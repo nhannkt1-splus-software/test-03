@@ -1,0 +1,55 @@
+{
+  "class_design": {
+    "class_diagram": [
+      "@startuml",
+      "",
+      "@enduml"
+    ],
+    "files": {}
+  },
+  "method_design": {
+    "files": {}
+  },
+  "folder_structure": {
+    "summaries": {
+      "app": "アプリケーション本体のコード",
+      "tests": "テストコードを格納するディレクトリ"
+    },
+    "folder_structure": [
+      ".gitignore",
+      "README.md",
+      "app/",
+      "├── __init__.py",
+      "├── constants.py",
+      "├── exceptions.py",
+      "├── main.py",
+      "├── routers/",
+      "│   └── __init__.py",
+      "├── schemas.py",
+      "├── services/",
+      "│   ├── __init__.py",
+      "│   ├── label_service.py",
+      "│   ├── member_service.py",
+      "│   ├── project_service.py",
+      "│   ├── stats_service.py",
+      "│   ├── ticket_service.py",
+      "│   └── worklog_service.py",
+      "├── static/",
+      "│   └── styles.css",
+      "├── store.py",
+      "└── templates/",
+      "    ├── base.html",
+      "    ├── index.html",
+      "    ├── members.html",
+      "    ├── not_found.html",
+      "    ├── projects.html",
+      "    ├── stats.html",
+      "    └── ticket_detail.html",
+      "pyproject.toml",
+      "requirements.txt",
+      "test-01.txt",
+      "tests/",
+      "└── __init__.py"
+    ]
+  }
+}
