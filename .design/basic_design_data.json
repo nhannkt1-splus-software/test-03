@@ -1,0 +1,3842 @@
+{
+  "architecture_design": {
+    "architecture_pattern": {
+      "pattern": "イベント駆動アーキテクチャ",
+      "reason": [
+        {
+          "category": "機能要件に基づく理由",
+          "reason": "MQTTブローカーを中心とした非同期メッセージ連携により、各コンポーネント間の疎結合を実現し、タスク登録・進捗通知・コード生成・プロジェクトイベントの即時配信が可能となる。"
+        },
+        {
+          "category": "非機能要件に基づく理由",
+          "reason": "イベント駆動方式はスケーラビリティや可用性の向上、障害時の独立復旧、メッセージ再送・永続化などの信頼性要件に適合する。"
+        },
+        {
+          "category": "運用と保守の観点",
+          "reason": "各コンポーネントの責務分離と共通仕様の一元化により、保守性・拡張性・運用効率が高まる。"
+        }
+      ],
+      "scope": [
+        {
+          "approach": "MQTTブローカー（Mosquitto）を中心に、DocifyCodeFrontendBackend・DocifyCodeGenerativeService・AICodeBotの3コンポーネントがトピックベースでpublish/subscribeを行う。各コンポーネントはイベント発生時にメッセージを送信し、受信側は非同期で処理を実行する。",
+          "purpose": "疎結合な非同期連携によるタスク登録・進捗通知・コード生成・プロジェクトイベントの即時配信と、システム全体の拡張性・保守性向上。"
+        },
+        {
+          "approach": "共通MQTT仕様・スキーマ・暗号化処理をsrc/common配下に一元化し、各コンポーネントは共通パッケージを参照して実装する。重複実装を排除し、仕様変更時の整合性を担保する。",
+          "purpose": "仕様の一貫性維持と保守効率化、セキュリティ強化（認証情報暗号化等）の共通化。"
+        },
+        {
+          "approach": "各コンポーネント内部はinterface層（MQTT購読・API公開）、application層（メッセージ処理・ユースケース調停）、domain/schema層（Pydanticモデル・トピック定義）、infrastructure層（MQTTラッパー・再接続・暗号化・永続化）で責務分割する。",
+          "purpose": "業務処理とインフラ処理の分離による保守性・テスト容易性・障害時の独立復旧。"
+        }
+      ]
+    },
+    "layer_structure": [
+      {
+        "name": "interface層",
+        "role": "MQTT購読開始点や外部公開API（FastAPIエンドポイント、WebSocket配信）を提供し、外部からの入力や通知を受け付ける。",
+        "trait": "MQTTトピック購読・publish、HTTP/WebSocketインターフェース、初期化・接続監視。"
+      },
+      {
+        "name": "application層",
+        "role": "メッセージ処理フローとユースケース調停を担当し、受信イベントに応じた業務ロジックを実行する。",
+        "trait": "タスク登録・進捗更新・コード生成・プロジェクトイベントの業務処理、状態管理、メッセージ再送。"
+      },
+      {
+        "name": "domain/schema層",
+        "role": "MQTTメッセージモデル（Pydantic）、列挙型、トピック定義等の業務ドメイン知識を集約する。",
+        "trait": "厳密なスキーマバリデーション、暗号化フィールド管理、トピック⇔メッセージ型マッピング。"
+      },
+      {
+        "name": "infrastructure層",
+        "role": "MQTTクライアントラッパー（paho-mqtt）、再接続制御、暗号化処理、永続化連携等のインフラ機能を提供する。",
+        "trait": "接続管理、QoS/retain制御、AES-256-GCM暗号化、Docker/Mosquitto構成管理。"
+      }
+    ],
+    "technology_stack": {
+      "selection_criteria": [
+        {
+          "performance_requirement": "MQTT QoS2・retain運用による高信頼な即時配信と、Pydanticによる高速なスキーマバリデーション。",
+          "availability": "Mosquittoの永続化設定・自動再接続・メッセージ再送機能による高可用性。",
+          "scalability": "イベント駆動方式とDocker Composeによるコンポーネント分離・スケールアウト対応。",
+          "security": "AES-256-GCMによる認証情報暗号化、共通パッケージでの暗号化処理一元化。",
+          "operations_maintenance": "共通パッケージ化による仕様一貫性、責務分割による保守効率化、ログ出力・監視機能。",
+          "development_efficiency": "Python・FastAPI・Pydanticの高い生産性、既存実装資産の活用、Dockerによる環境統一。"
+        }
+      ],
+      "recommended_stack": [
+        {
+          "layer": "interface層",
+          "technology": "FastAPI",
+          "technology_reason": "HTTP/WebSocketエンドポイントの提供と非同期処理に強く、Python標準で高い開発効率を実現する。",
+          "supporting_technology": "FastAPI WebSocket",
+          "supporting_technology_reason": "MQTTで受信した進捗ステータスをリアルタイムでUIクライアントへ配信するために必要。"
+        },
+        {
+          "layer": "application層",
+          "technology": "Python",
+          "technology_reason": "全コンポーネントの業務ロジック実装言語として、既存資産の活用と高い生産性を両立する。",
+          "supporting_technology": "Pydantic",
+          "supporting_technology_reason": "メッセージスキーマの厳密なバリデーションと型安全なデータ管理を実現する。"
+        },
+        {
+          "layer": "domain/schema層",
+          "technology": "Pydantic",
+          "technology_reason": "MQTTメッセージモデルの定義とバリデーション、暗号化フィールド管理に最適。",
+          "supporting_technology": "Python Enum",
+          "supporting_technology_reason": "トピック定義やステータス値の厳密な列挙型管理に必要。"
+        },
+        {
+          "layer": "infrastructure層",
+          "technology": "paho-mqtt",
+          "technology_reason": "MQTTブローカーとの接続・publish/subscribe・再接続制御において、Pythonで最も実績あるライブラリ。",
+          "supporting_technology": "AES-256-GCM（Python cryptography）",
+          "supporting_technology_reason": "認証情報（Gitトークン等）の暗号化・復号処理を安全に実装するため。"
+        },
+        {
+          "layer": "infrastructure層",
+          "technology": "Eclipse Mosquitto",
+          "technology_reason": "MQTTブローカーとして高信頼・高性能・永続化対応、Docker運用に最適。",
+          "supporting_technology": "Docker Compose",
+          "supporting_technology_reason": "ローカル・Azure環境でのブローカー構成管理と起動自動化に必要。"
+        },
+        {
+          "layer": "infrastructure層",
+          "technology": "Shell Script",
+          "technology_reason": "環境別compose生成・ブローカー起動補助に必要。",
+          "supporting_technology": "json-fileログドライバ",
+          "supporting_technology_reason": "MQTTブローカーのログ永続化・障害調査に必要。"
+        }
+      ]
+    },
+    "non_functional_requirements": [
+      {
+        "category": "性能・スケーラビリティ",
+        "objective": "タスク登録・進捗通知・コード生成イベントの即時配信と、複数コンポーネントの同時処理に耐えるスケーラビリティを確保する。",
+        "priority": "Critical",
+        "implementation_policy": "MQTT QoS2・retain運用、Mosquitto永続化設定、Python非同期処理、Docker Composeによるコンポーネント分離・スケールアウト対応。",
+        "measurement": "メッセージ配信遅延（ms）、同時処理数、ブローカー再起動時の再配送信成功率。"
+      },
+      {
+        "category": "可用性・信頼性",
+        "objective": "障害時の自動復旧・再接続、メッセージ再送、永続セッションによる取りこぼし防止。",
+        "priority": "High",
+        "implementation_policy": "paho-mqttの自動再接続・再subscribe、Mosquitto永続化、Frontendのclean_session=False運用、GenerativeServiceのオフライン時メッセージキュー。",
+        "measurement": "障害発生時の復旧時間、メッセージ再送成功率、セッション維持率。"
+      },
+      {
+        "category": "保守性・運用性",
+        "objective": "仕様変更時の一貫性維持、障害調査・運用監視の容易化、責務分割による保守効率化。",
+        "priority": "High",
+        "implementation_policy": "共通パッケージ化（src/common）、責務分割（interface/application/domain/infrastructure）、json-fileログドライバ、例外ログDB保存。",
+        "measurement": "仕様変更時の修正箇所数、障害調査時間、運用監視項目数。"
+      },
+      {
+        "category": "移植性",
+        "objective": "ローカル・Azure等複数環境での容易なデプロイ・運用。",
+        "priority": "Medium",
+        "implementation_policy": "Docker Composeによる環境別構成管理、環境変数による接続先切替、Shell Scriptによる起動補助。",
+        "measurement": "環境切替所要時間、デプロイ手順数、環境変数設定項目数。"
+      },
+      {
+        "category": "セキュリティ",
+        "objective": "認証情報（Gitトークン等）の安全な暗号化・復号、将来の認証・ACL・TLS対応への拡張性。",
+        "priority": "High",
+        "implementation_policy": "AES-256-GCMによる暗号化、暗号化処理の共通パッケージ化、Mosquitto認証・ACL・TLS設定の拡張余地を残す。",
+        "measurement": "暗号化フィールドの漏洩防止率、認証・認可設定項目数、セキュリティ監査対応状況。"
+      },
+      {
+        "category": "法令・規制遵守",
+        "objective": "個人情報・認証情報の安全管理、社内ネットワーク外からのアクセス制御。",
+        "priority": "Medium",
+        "implementation_policy": "認証情報暗号化、ネットワーク分離（docifycode_network）、将来のACL・TLS対応検討。",
+        "measurement": "認証情報漏洩件数、アクセス制御設定項目数、監査ログ出力状況。"
+      }
+    ]
+  },
+  "system_configuration": {
+    "diagram": [
+      "@startuml",
+      "' Color definitions",
+      "!define RECTANGLE_COLOR_INTERNAL #D6EAF8",
+      "!define RECTANGLE_COLOR_EXTERNAL #F9E79F",
+      "!define RECTANGLE_COLOR_BROKER #F5B041",
+      "!define RECTANGLE_COLOR_API #F7DC6F",
+      "!define RECTANGLE_COLOR_CLIENT #F2F4F4",
+      "",
+      "' Internal Components",
+      "rectangle \"DocifyCodeFrontendBackend\" as frontend_backend [[RECTANGLE_COLOR_INTERNAL]]",
+      "rectangle \"DocifyCodeGenerativeService\" as generative_service [[RECTANGLE_COLOR_INTERNAL]]",
+      "rectangle \"AICodeBot\" as ai_code_bot [[RECTANGLE_COLOR_INTERNAL]]",
+      "rectangle \"DocifyCodeMqttBrokerConfig\" as mqtt_broker_config [[RECTANGLE_COLOR_INTERNAL]]",
+      "",
+      "' External Components",
+      "rectangle \"Mosquitto Broker\" as mosquitto_broker [[RECTANGLE_COLOR_BROKER]]",
+      "rectangle \"MQTT Client API (paho-mqtt)\" as mqtt_client_api [[RECTANGLE_COLOR_API]]",
+      "rectangle \"WebSocket Clients\" as frontend_websocket_clients [[RECTANGLE_COLOR_CLIENT]]",
+      "",
+      "' Grouping",
+      "package \"Internal Components\" [[RECTANGLE_COLOR_INTERNAL]] {",
+      "  frontend_backend",
+      "  generative_service",
+      "  ai_code_bot",
+      "  mqtt_broker_config",
+      "}",
+      "package \"External Components\" [[RECTANGLE_COLOR_EXTERNAL]] {",
+      "  mosquitto_broker",
+      "  mqtt_client_api",
+      "  frontend_websocket_clients",
+      "}",
+      "",
+      "' Connections",
+      "frontend_backend -[hidden]-> mqtt_broker_config",
+      "",
+      "' MQTT Client API usage",
+      "frontend_backend --> mqtt_client_api : uses (Python/paho-mqtt)",
+      "generative_service --> mqtt_client_api : uses (Python/paho-mqtt)",
+      "ai_code_bot --> mqtt_client_api : uses (Python/paho-mqtt)",
+      "",
+      "' MQTT Broker connection",
+      "mqtt_client_api --> mosquitto_broker : MQTT 3.1.1 / WebSocket",
+      "",
+      "' Publish/Subscribe flows",
+      "frontend_backend --> mosquitto_broker : publish TaskRegistration, Status, CodeGeneration, ProjectEvent (MQTT)",
+      "mosquitto_broker --> generative_service : subscribe TaskRegistration, Status (MQTT)",
+      "generative_service --> mosquitto_broker : publish Status, clear retention (MQTT)",
+      "mosquitto_broker --> frontend_backend : subscribe Status (MQTT)",
+      "frontend_backend --> frontend_websocket_clients : push status updates (WebSocket)",
+      "mosquitto_broker --> ai_code_bot : subscribe CodeGeneration, ProjectEvent (MQTT)",
+      "ai_code_bot --> mosquitto_broker : publish Status (MQTT)",
+      "",
+      "' Broker config",
+      "mqtt_broker_config --> mosquitto_broker : manages config (Docker Compose)",
+      "@enduml"
+    ],
+    "components": {
+      "DocifyCodeFrontendBackend": {
+        "component_name": "DocifyCodeFrontendBackend",
+        "role": "ユーザー操作に基づきタスク登録メッセージをMQTTで発行し、進捗ステータスを受信してデータベース更新およびWebSocket経由でフロントエンドクライアントへリアルタイム通知を行うバックエンドサービスです。",
+        "software_specification": "Python 3.10+, FastAPI, Pydantic v2, paho-mqtt (v1.6+), 共通MQTTパッケージ（src/common）、WebSocket（FastAPI標準）、Docker対応",
+        "relationship": "MQTT Client API（paho-mqtt）を通じてMosquitto Brokerに接続し、TaskRegistration/Status/CodeGeneration/ProjectEventトピックでpublish/subscribeを行い、受信したStatusをWebSocketでfrontend_websocket_clientsに配信します。",
+        "notes": "MQTTのQoS2・retain運用、clean_session=Falseによる永続セッション、再接続監視・自動復旧機能を実装しています。セキュリティは現状匿名接続・平文通信ですが、将来的な強化が推奨されます。"
+      },
+      "DocifyCodeGenerativeService": {
+        "component_name": "DocifyCodeGenerativeService",
+        "role": "MQTT経由でタスク登録メッセージを受信し、AIによる生成処理を非同期で実行、進捗や完了ステータスをMQTTでpublishするワーカーサービスです。",
+        "software_specification": "Python 3.10+, Pydantic v2, paho-mqtt (v1.6+), 共通MQTTパッケージ（src/common）、Docker対応",
+        "relationship": "MQTT Client APIを介してMosquitto BrokerからTaskRegistration/Statusトピックをsubscribeし、Statusメッセージをpublishします。オフライン時はメッセージキューで再送制御を行います。",
+        "notes": "QoS2・retain運用、clean_session=True、再接続時のメッセージ一括再送、タスク完了時のretentionクリア処理を備えています。AI生成処理の詳細はTBDです。"
+      },
+      "AICodeBot": {
+        "component_name": "AICodeBot",
+        "role": "コード生成リクエストやプロジェクト設定イベントをMQTTで購読し、Gitリポジトリ連携やコード生成処理、プロジェクト設定キャッシュ管理を行うエージェントサービスです。",
+        "software_specification": "Python 3.10+, Pydantic v2, paho-mqtt (v1.6+), 共通MQTTパッケージ（src/common）、Docker対応",
+        "relationship": "MQTT Client APIを通じてMosquitto BrokerのCodeGeneration/ProjectEventトピックをsubscribeし、Statusメッセージをpublishします。内部でGit連携やキャッシュ管理を行います。",
+        "notes": "MQTTクライアントIDは用途ごとに分割され、10秒間隔の接続監視・自動再接続機能を持ちます。セキュリティは現状匿名・平文です。"
+      },
+      "DocifyCodeMqttBrokerConfig": {
+        "component_name": "DocifyCodeMqttBrokerConfig",
+        "role": "Eclipse Mosquittoブローカーの設定ファイル、Docker Compose定義、起動スクリプト、永続化ディレクトリなどを管理するインフラ構成コンポーネントです。",
+        "software_specification": "Eclipse Mosquitto 2.0, Docker Compose, Shell Script, カスタムイメージ（docifycode/mqtt:1.0.0）",
+        "relationship": "Mosquitto Brokerの設定・起動・永続化ディレクトリ・ログ管理を担い、MQTTネットワークの基盤を提供します。アプリケーションからは直接参照されませんが、全MQTT通信の基盤となります。",
+        "notes": "allow_anonymous true、認証・ACL・TLS未設定、永続化・ログローテーション・restart:always設定あり。将来的なセキュリティ強化が必要です。"
+      },
+      "mosquitto_broker": {
+        "component_name": "mosquitto_broker",
+        "role": "MQTTメッセージの中継・配信を行うEclipse Mosquittoブローカーで、全コンポーネント間の非同期通信の中心となります。",
+        "software_specification": "Eclipse Mosquitto 2.0, Dockerコンテナ, 設定ファイル（mosquitto.conf）、永続化・WebSocket有効",
+        "relationship": "MQTT Client API経由でDocifyCodeFrontendBackend、DocifyCodeGenerativeService、AICodeBotと接続し、各種トピックでpublish/subscribeを仲介します。",
+        "notes": "allow_anonymous true、認証・TLS・ACL未設定、QoS2・retain運用、永続化有効。外部ネットワークdocifycode_networkに接続。"
+      },
+      "mqtt_client_api": {
+        "component_name": "mqtt_client_api",
+        "role": "各内部コンポーネントがMosquitto BrokerとMQTTプロトコルで通信するためのPythonクライアントAPI（paho-mqtt）です。",
+        "software_specification": "paho-mqtt (v1.6+), Python 3.10+, 共通MQTTラッパー（src/common/mqtt）",
+        "relationship": "DocifyCodeFrontendBackend、DocifyCodeGenerativeService、AICodeBotがこのAPIを利用してMosquitto Brokerに接続し、メッセージのpublish/subscribeを行います。",
+        "notes": "自動再接続、QoS2、retain、clean_session制御、シングルトン管理、トピック/メッセージ型マッピング、暗号化補助機能を備えています。"
+      },
+      "frontend_websocket_clients": {
+        "component_name": "frontend_websocket_clients",
+        "role": "DocifyCodeFrontendBackendからWebSocket経由で進捗ステータス通知を受信するフロントエンドのブラウザやUIクライアント群です。",
+        "software_specification": "WebSocketクライアント（例: JavaScript/TypeScript, HTML5 WebSocket API, 任意のUIフレームワーク）",
+        "relationship": "DocifyCodeFrontendBackendがMQTTで受信したStatusをWebSocketでリアルタイム配信し、クライアントはこれを受信してUI表示を更新します。",
+        "notes": "MQTTには直接接続せず、WebSocket経由でのみ通知を受け取ります。リアルタイム性が求められます。"
+      }
+    }
+  },
+  "use_case_diagram": {
+    "actors": {
+      "human_actors": [
+        "ユーザー"
+      ],
+      "external_system_actors": [
+        "Mosquittoブローカー",
+        "Gitリポジトリ"
+      ]
+    },
+    "main_usecases": [
+      {
+        "name": "タスク登録メッセージを送信する",
+        "references": [
+          "ユーザー操作を起点として、新規タスク登録依頼を非同期処理基盤へ送信する。",
+          "処理対象、プロジェクト、生成種別、任意オプション、Git認証情報を含むタスク開始要求を登録する。"
+        ],
+        "description": "ユーザーは生成処理を開始するために、対象プロジェクトと生成対象を指定してタスク登録を行う。システムはタスク登録メッセージを作成し、対象の処理履歴IDに対応するトピックへ送信する。これにより後続の生成処理サービスが非同期に処理を開始できる状態になる。"
+      },
+      {
+        "name": "タスク登録時のGit認証情報を暗号化して送信する",
+        "references": [
+          "タスク登録時に含まれるGitトークンまたはパスワードを保護した状態で連携する。",
+          "認証情報を平文ではなく暗号化済みデータとしてメッセージに含める。"
+        ],
+        "description": "ユーザーがGit連携に必要な認証情報を伴うタスクを登録する場合、システムは認証情報を暗号化したうえでタスク登録メッセージに含めて送信する。これにより、非同期メッセージ連携において認証情報を保護しながら処理要求を渡せる。"
+      },
+      {
+        "name": "タスク進捗ステータスを受信する",
+        "references": [
+          "生成処理サービスまたはAICodeBotが通知する進捗状態を受信する。",
+          "処理中、完了、エラー、キャンセルなどの状態変化を継続的に取り込む。"
+        ],
+        "description": "システムは各処理履歴IDに対応する進捗ステータスメッセージを受信し、対象タスクの状態変化を把握する。これにより、ユーザーが開始した処理の現在状況を追跡できる。"
+      },
+      {
+        "name": "進捗ステータスを永続化する",
+        "references": [
+          "受信した進捗情報を内部状態として保持し、後続参照や通知に利用できるようにする。",
+          "進捗受信時にDB更新を行う。"
+        ],
+        "description": "システムは受信した進捗ステータスに基づいて対象プロジェクトまたは処理履歴の状態を更新し、永続化する。これにより、リアルタイム通知だけでなく、後から状態を参照した場合にも一貫した結果を提供できる。"
+      },
+      {
+        "name": "進捗ステータスをWebSocketで配信する",
+        "references": [
+          "MQTTで受信した進捗情報をブラウザやUIクライアントへリアルタイム通知する。",
+          "ユーザー向けに処理状況を即時反映する。"
+        ],
+        "description": "システムは受信した進捗ステータスをWebSocket経由で接続中のクライアントへ配信する。これにより、ユーザーは画面を再読み込みせずに処理の進行状況や完了結果をリアルタイムで確認できる。"
+      },
+      {
+        "name": "タスク登録メッセージを受信して生成処理を開始する",
+        "references": [
+          "生成処理サービスが新規タスク登録依頼を購読し、AIによる生成処理を開始する。",
+          "非同期ワーカーがタスク登録を受けて処理を実行する。"
+        ],
+        "description": "生成処理サービスはタスク登録メッセージを受信すると、その内容を検証し、指定された生成対象に応じた生成処理を開始する。これにより、ユーザーが登録したタスクがバックグラウンドで実行される。"
+      },
+      {
+        "name": "生成処理の進捗ステータスを送信する",
+        "references": [
+          "生成処理サービスが処理中の状態変化をステータスメッセージとして通知する。",
+          "pending、generating、completed、error、canceled などの状態を連携する。"
+        ],
+        "description": "生成処理サービスまたはAICodeBotは、処理開始時や進行中、完了時、異常終了時に進捗ステータスを送信する。これにより、他コンポーネントは処理状況を把握し、ユーザー通知や状態更新を行える。"
+      },
+      {
+        "name": "完了またはエラー時に保持メッセージを削除する",
+        "references": [
+          "処理完了後にretainされた最新メッセージを明示的に消去する。",
+          "完了済みまたは異常終了済みの古い状態が後続購読者へ残り続けないようにする。"
+        ],
+        "description": "システムはタスクが完了またはエラーになった時点で、該当トピックの保持メッセージを削除する。これにより、後から接続した購読者が不要な古い状態を受け取らず、最新の運用状態を適切に保てる。"
+      },
+      {
+        "name": "タスク登録受信後に登録メッセージの保持を解除する",
+        "references": [
+          "生成処理サービスがタスク登録を受理した後、登録要求のretainメッセージを削除する。",
+          "同じ登録要求が不要に残存しないようにする。"
+        ],
+        "description": "生成処理サービスはタスク登録メッセージを受信して処理開始を確定した後、その登録メッセージの保持を解除する。これにより、過去の登録要求がブローカー上に残り続けることを防ぐ。"
+      },
+      {
+        "name": "完了した処理に対して次工程のタスクを自動登録する",
+        "references": [
+          "特定の生成対象では、前工程の完了を契機に次工程のタスク登録を自動で行う。",
+          "生成連鎖対象の処理を段階的に進める。"
+        ],
+        "description": "システムは特定の生成対象において、前段の処理が完了したことを検知すると、次工程に必要なタスク登録メッセージを自動送信する。これにより、複数段階の生成フローをユーザーの追加操作なしで連続実行できる。"
+      },
+      {
+        "name": "コード生成リクエストを送信する",
+        "references": [
+          "任意の発行元がAICodeBot向けのコード生成要求を送信する。",
+          "詳細設計からコード生成を行うための要求を非同期連携基盤へ登録する。"
+        ],
+        "description": "ユーザーまたは他コンポーネントは、対象プロジェクト、処理履歴ID、対象ブランチ、対象言語を指定してコード生成リクエストを送信する。これにより、AICodeBotがコード生成処理を開始できる。"
+      },
+      {
+        "name": "コード生成リクエストを受信して処理する",
+        "references": [
+          "AICodeBotがコード生成要求を購読し、対象条件に合致する要求を処理する。",
+          "コード生成関連処理を独立エージェントとして実行する。"
+        ],
+        "description": "AICodeBotはコード生成リクエストを受信し、対応する生成対象であることを確認したうえでコード生成処理を実行する。これにより、詳細設計からソースコード生成へつながる別系統の非同期処理が実現される。"
+      },
+      {
+        "name": "コード生成受付時に初期ステータスを通知する",
+        "references": [
+          "AICodeBotがコード生成要求を受け付けたことをステータスで通知する。",
+          "受付直後の状態として pending を発行する。"
+        ],
+        "description": "AICodeBotはコード生成リクエストを受理すると、処理開始前の初期状態として pending ステータスを送信する。これにより、依頼元や関連コンポーネントは要求が受け付けられたことを即時に把握できる。"
+      },
+      {
+        "name": "プロジェクト設定イベントを送信する",
+        "references": [
+          "プロジェクトの新規作成、編集、削除に関するイベントを非同期連携基盤へ通知する。",
+          "AICodeBotが参照するプロジェクト設定の同期契機を提供する。"
+        ],
+        "description": "ユーザーまたは他コンポーネントは、プロジェクトに対する新規作成・編集・削除イベントを送信する。これにより、AICodeBotは対象プロジェクトの設定変更を検知できる。"
+      },
+      {
+        "name": "プロジェクト設定イベントを受信して設定キャッシュを再構築する",
+        "references": [
+          "AICodeBotが new または edit のプロジェクトイベントを受信した際に設定情報を再同期する。",
+          "プロジェクト設定の最新状態を内部キャッシュへ反映する。"
+        ],
+        "description": "AICodeBotはプロジェクト設定イベントのうち新規作成または編集を受信すると、対象プロジェクトの設定情報を再取得または再構築し、内部キャッシュを最新化する。これにより、後続のコード生成やGit連携処理が最新設定に基づいて実行される。"
+      },
+      {
+        "name": "プロジェクト削除イベントを受信して設定キャッシュを削除する",
+        "references": [
+          "AICodeBotが delete のプロジェクトイベントを受信した際に対象設定を削除する。",
+          "不要になったプロジェクト設定を内部保持から除去する。"
+        ],
+        "description": "AICodeBotはプロジェクト削除イベントを受信すると、対象プロジェクトに対応する設定キャッシュを削除する。これにより、削除済みプロジェクトに対する不要な処理や誤参照を防止できる。"
+      },
+      {
+        "name": "Gitリポジトリと連携してコード生成関連処理を行う",
+        "references": [
+          "AICodeBotがGitリポジトリ連携を伴うコード生成処理を担当する。",
+          "プロジェクト設定やコード生成要求に基づいてGit関連処理を実行する。"
+        ],
+        "description": "AICodeBotはコード生成要求やプロジェクト設定に応じてGitリポジトリと連携し、必要なコード生成関連処理を行う。これにより、対象プロジェクトのソース資産を利用した生成や同期処理が可能になる。"
+      },
+      {
+        "name": "MQTTブローカーへ接続する",
+        "references": [
+          "各コンポーネントが非同期連携を行うためにブローカーへ接続する。",
+          "publish/subscribe の前提となる通信経路を確立する。"
+        ],
+        "description": "Frontend Backend、Generative Service、AICodeBot は、それぞれMQTTブローカーへ接続してメッセージ送受信を可能にする。これにより、疎結合なイベント駆動連携が成立する。"
+      },
+      {
+        "name": "MQTTトピックを購読する",
+        "references": [
+          "各コンポーネントが必要なイベント種別を受信するために対象トピックを購読する。",
+          "ワイルドカード購読により複数の処理履歴IDをまとめて監視する。"
+        ],
+        "description": "システムは役割に応じて、タスク登録、進捗ステータス、コード生成要求、プロジェクト設定イベントの各トピックを購読する。これにより、必要なイベントを継続的に受信して処理できる。"
+      },
+      {
+        "name": "切断後にMQTT接続を自動再接続する",
+        "references": [
+          "通信断やブローカー再起動後も連携を継続するため、自動再接続を行う。",
+          "接続監視と再試行により可用性を維持する。"
+        ],
+        "description": "システムはMQTT接続の切断を検知すると、自動的に再接続を試みる。これにより、一時的な通信障害やブローカー再起動が発生しても、非同期連携を継続できる。"
+      },
+      {
+        "name": "再接続後に購読を自動復旧する",
+        "references": [
+          "再接続成功後、それまで購読していたトピックを再度購読する。",
+          "切断前と同じイベント受信状態を回復する。"
+        ],
+        "description": "システムはMQTTブローカーへの再接続後、以前に購読していたトピック群を自動的に再購読する。これにより、切断前と同様にイベント受信を継続できる。"
+      },
+      {
+        "name": "オフライン中に蓄積したメッセージを再送する",
+        "references": [
+          "GenerativeServiceがオフライン中に送れなかった進捗通知や保持解除操作を再送する。",
+          "一時的な切断中の通知欠落を補完する。"
+        ],
+        "description": "生成処理サービスはオフライン中に送信できなかったステータスメッセージや保持解除操作をキューに保持し、再接続後にまとめて再送する。これにより、通信断による通知漏れを最小化できる。"
+      },
+      {
+        "name": "永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+        "references": [
+          "Frontend Backend は永続セッションを利用して、切断中のメッセージ受信漏れを抑止する。",
+          "後から再接続しても必要な進捗情報を受け取れるようにする。"
+        ],
+        "description": "Frontend Backend は永続セッションを利用してMQTTブローカーと接続し、オフライン中に発生した進捗ステータスの取りこぼしを防ぐ。これにより、再接続後も処理状態を継続的に追跡しやすくなる。"
+      },
+      {
+        "name": "不正または解釈不能なメッセージをエラーとして処理する",
+        "references": [
+          "JSONデコード失敗やスキーマ不一致などの異常メッセージを検知して処理する。",
+          "異常時はログ出力や例外記録を行い、必要に応じて状態をエラーへフォールバックする。"
+        ],
+        "description": "システムは受信メッセージが不正なJSONである場合や、定義済みスキーマに適合しない場合、または処理中に例外が発生した場合に、エラーとして扱う。必要に応じてログや例外情報を保存し、対象処理の状態をエラーへ更新することで、異常を可視化する。"
+      },
+      {
+        "name": "空ペイロードの保持解除メッセージを無視する",
+        "references": [
+          "retain削除のために送信された空メッセージを通常業務メッセージとして処理しない。",
+          "不要なコールバック実行や誤処理を防止する。"
+        ],
+        "description": "システムは保持解除目的で送信された空ペイロードのメッセージを受信した場合、通常の業務処理を行わずに無視する。これにより、保持削除操作が誤って業務イベントとして扱われることを防ぐ。"
+      }
+    ],
+    "sub_usecases": [
+      {
+        "name": "タスク登録メッセージの暗号化フィールド生成",
+        "description": "タスク登録メッセージを送信する際、Git認証情報（token_password）をAES-256-GCM方式で暗号化し、暗号化済みデータとしてメッセージに含める処理。これは「タスク登録時のGit認証情報を暗号化して送信する」メインユースケースの一部として、タスク登録メッセージ生成時に自動的に実行される。",
+        "reasons": "Git認証情報を平文で送信するとセキュリティリスクが高まるため、タスク登録メッセージ内の認証情報を暗号化する必要がある。これにより、非同期メッセージ連携時に認証情報の漏洩を防止し、システム全体の安全性を確保できる。"
+      },
+      {
+        "name": "タスク登録メッセージ受信時の認証情報復号",
+        "description": "タスク登録メッセージを受信した際、暗号化されたGit認証情報（token_password）を自動的に復号し、生成処理サービスが平文の認証情報として利用できるようにする処理。これは「タスク登録メッセージを受信して生成処理を開始する」メインユースケースの一部として、受信直後に実行される。",
+        "reasons": "生成処理サービスがGit連携を行うためには、暗号化された認証情報を復号して利用可能な状態にする必要がある。これにより、セキュリティを維持しつつ、業務処理に必要な情報を正しく取得できる。"
+      },
+      {
+        "name": "タスク登録メッセージの保持解除",
+        "description": "生成処理サービスがタスク登録メッセージを受信し、処理開始を確定した後、該当トピックの保持メッセージ（retained message）を空ペイロードで削除する処理。これは「タスク登録受信後に登録メッセージの保持を解除する」メインユースケースの一部として、タスク登録受理直後に実行される。",
+        "reasons": "タスク登録メッセージがブローカー上に残り続けると、後続の購読者が古い登録要求を誤って受信するリスクがあるため、処理開始後は不要な保持メッセージを削除し、システムの一貫性と正確性を保つ必要がある。"
+      },
+      {
+        "name": "進捗ステータスメッセージの保持解除",
+        "description": "タスクが完了またはエラーとなった際、該当トピックの進捗ステータスメッセージ（retained message）を空ペイロードで削除する処理。これは「完了またはエラー時に保持メッセージを削除する」メインユースケースの一部として、最終ステータス検知後に実行される。",
+        "reasons": "完了済みや異常終了済みの古い進捗情報が後続の購読者に残り続けることを防ぎ、常に最新の運用状態のみが参照されるようにするために必要である。"
+      },
+      {
+        "name": "空ペイロード保持解除メッセージの無視",
+        "description": "保持解除目的で送信された空ペイロードのメッセージを受信した場合、通常の業務処理を行わずに無視する処理。これは「空ペイロードの保持解除メッセージを無視する」メインユースケースの一部として、全メッセージ受信時のガード処理として実行される。",
+        "reasons": "保持削除操作が誤って業務イベントとして処理されることを防止し、不要なコールバックや誤動作を回避するために必要である。"
+      },
+      {
+        "name": "進捗ステータスメッセージのWebSocket配信",
+        "description": "DocifyCodeFrontendが受信した進捗ステータスメッセージを、WebSocket経由で接続中のクライアント（ブラウザ等）へリアルタイム配信する処理。これは「進捗ステータスをWebSocketで配信する」メインユースケースの一部として、進捗受信時に実行される。",
+        "reasons": "ユーザーが画面を再読み込みせずに処理の進行状況や完了結果を即時に確認できるようにするため、リアルタイム通知が必要である。"
+      },
+      {
+        "name": "進捗ステータスメッセージのDB更新",
+        "description": "DocifyCodeFrontendが受信した進捗ステータスメッセージに基づき、対象プロジェクトまたは処理履歴の状態をDBに更新する処理。これは「進捗ステータスを永続化する」メインユースケースの一部として、進捗受信時に実行される。",
+        "reasons": "リアルタイム通知だけでなく、後から状態を参照した場合にも一貫した結果を提供するため、進捗情報をDBに永続化する必要がある。"
+      },
+      {
+        "name": "ワイルドカードによるトピック購読",
+        "description": "メッセージID未指定時に、トピックのプレースホルダ部分を単一階層ワイルドカード（+）に置換して複数の処理履歴IDをまとめて購読する処理。これは「MQTTトピックを購読する」メインユースケースの一部として、subscribe時に実行される。",
+        "reasons": "複数のタスクやプロジェクトの進捗・イベントを効率的に監視するため、ワイルドカード購読による一括監視が必要である。"
+      },
+      {
+        "name": "オフライン中メッセージのキューイングと再送",
+        "description": "生成処理サービスがMQTTブローカーとの接続が切断されている間、送信できなかった進捗ステータスメッセージや保持解除操作を内部キューに保持し、再接続後にまとめて再送する処理。これは「オフライン中に蓄積したメッセージを再送する」メインユースケースの一部として、再接続時に実行される。",
+        "reasons": "一時的な通信断による通知漏れを防ぎ、システムの信頼性と一貫性を維持するために必要である。"
+      },
+      {
+        "name": "MQTT再接続時の自動再購読",
+        "description": "MQTTブローカーへの再接続後、切断前に購読していたトピック群を自動的に再購読する処理。これは「再接続後に購読を自動復旧する」メインユースケースの一部として、再接続成功時に実行される。",
+        "reasons": "切断前と同じイベント受信状態を回復し、システムの可用性と連続性を確保するために必要である。"
+      },
+      {
+        "name": "MQTT接続監視と自動再接続",
+        "description": "MQTT接続の切断を検知した場合、自動的に再接続を試みる処理。これは「切断後にMQTT接続を自動再接続する」メインユースケースの一部として、接続監視時に実行される。",
+        "reasons": "一時的な通信障害やブローカー再起動が発生しても、非同期連携を継続できるようにするために必要である。"
+      },
+      {
+        "name": "永続セッションによる進捗ステータスの取りこぼし防止",
+        "description": "Frontend BackendがMQTTブローカーとclean_session=Falseの永続セッションで接続し、オフライン中に発生した進捗ステータスの取りこぼしを防ぐ処理。これは「永続セッションによりオフライン中のステータス取りこぼしを防ぐ」メインユースケースの一部として、MQTT接続時に実行される。",
+        "reasons": "再接続後も必要な進捗情報を受け取れるようにし、ユーザー体験と業務継続性を向上させるために必要である。"
+      },
+      {
+        "name": "不正メッセージのエラー処理",
+        "description": "受信したメッセージが不正なJSONやスキーマ不一致の場合、または処理中に例外が発生した場合に、エラーとして扱い、ログ出力や例外情報の保存、対象処理の状態をエラーへ更新する処理。これは「不正または解釈不能なメッセージをエラーとして処理する」メインユースケースの一部として、メッセージ受信時に実行される。",
+        "reasons": "異常なメッセージによるシステム障害や誤動作を防ぎ、異常を可視化して迅速な対応を可能にするために必要である。"
+      }
+    ],
+    "relations": [
+      {
+        "src": "ユーザー",
+        "dst": "タスク登録メッセージを送信する",
+        "type": "association"
+      },
+      {
+        "src": "タスク登録メッセージを送信する",
+        "dst": "タスク登録時のGit認証情報を暗号化して送信する",
+        "type": "extends"
+      },
+      {
+        "src": "タスク登録時のGit認証情報を暗号化して送信する",
+        "dst": "タスク登録メッセージの暗号化フィールド生成",
+        "type": "includes"
+      },
+      {
+        "src": "タスク進捗ステータスを受信する",
+        "dst": "進捗ステータスメッセージのDB更新",
+        "type": "includes"
+      },
+      {
+        "src": "タスク進捗ステータスを受信する",
+        "dst": "進捗ステータスメッセージのWebSocket配信",
+        "type": "includes"
+      },
+      {
+        "src": "進捗ステータスを永続化する",
+        "dst": "進捗ステータスメッセージのDB更新",
+        "type": "includes"
+      },
+      {
+        "src": "進捗ステータスをWebSocketで配信する",
+        "dst": "進捗ステータスメッセージのWebSocket配信",
+        "type": "includes"
+      },
+      {
+        "src": "進捗ステータスをWebSocketで配信する",
+        "dst": "タスク進捗ステータスを受信する",
+        "type": "association"
+      },
+      {
+        "src": "進捗ステータスを永続化する",
+        "dst": "タスク進捗ステータスを受信する",
+        "type": "association"
+      },
+      {
+        "src": "タスク登録メッセージを送信する",
+        "dst": "Mosquittoブローカー",
+        "type": "association"
+      },
+      {
+        "src": "タスク進捗ステータスを受信する",
+        "dst": "Mosquittoブローカー",
+        "type": "association"
+      },
+      {
+        "src": "進捗ステータスを永続化する",
+        "dst": "Mosquittoブローカー",
+        "type": "association"
+      },
+      {
+        "src": "進捗ステータスをWebSocketで配信する",
+        "dst": "Mosquittoブローカー",
+        "type": "association"
+      },
+      {
+        "src": "タスク登録時のGit認証情報を暗号化して送信する",
+        "dst": "Gitリポジトリ",
+        "type": "association"
+      }
+    ],
+    "sub_systems": [
+      {
+        "name": "タスク連携・進捗通知サブシステム",
+        "description": "ユーザーによるタスク登録、進捗ステータスの受信・永続化・WebSocket配信を中心とした、フロントエンドバックエンドの業務連携機能。主にユーザー操作起点のイベントと進捗管理を担当する。",
+        "usecases": [
+          "タスク登録メッセージを送信する",
+          "タスク登録時のGit認証情報を暗号化して送信する",
+          "タスク進捗ステータスを受信する",
+          "進捗ステータスを永続化する",
+          "進捗ステータスをWebSocketで配信する",
+          "永続セッションによりオフライン中のステータス取りこぼしを防ぐ"
+        ],
+        "sub_systems": [
+          {
+            "name": "進捗通知処理サブシステム",
+            "description": "進捗ステータスメッセージの受信、DB更新、WebSocket配信など、ユーザーへのリアルタイム通知と状態管理を担う。",
+            "usecases": [
+              "進捗ステータスメッセージのDB更新",
+              "進捗ステータスメッセージのWebSocket配信"
+            ],
+            "sub_systems": []
+          },
+          {
+            "name": "タスク登録セキュリティサブシステム",
+            "description": "タスク登録時のGit認証情報の暗号化とメッセージ生成、セキュリティ保護を担う。",
+            "usecases": [
+              "タスク登録メッセージの暗号化フィールド生成"
+            ],
+            "sub_systems": []
+          }
+        ]
+      },
+      {
+        "name": "生成処理・進捗管理サブシステム",
+        "description": "AI生成処理サービスによるタスク登録受信、生成処理開始、進捗ステータス送信、メッセージ保持解除やオフライン時の再送など、バックグラウンド生成業務を担う。",
+        "usecases": [
+          "タスク登録メッセージを受信して生成処理を開始する",
+          "生成処理の進捗ステータスを送信する",
+          "完了またはエラー時に保持メッセージを削除する",
+          "タスク登録受信後に登録メッセージの保持を解除する",
+          "完了した処理に対して次工程のタスクを自動登録する",
+          "オフライン中に蓄積したメッセージを再送する"
+        ],
+        "sub_systems": [
+          {
+            "name": "生成処理セキュリティサブシステム",
+            "description": "タスク登録メッセージ受信時のGit認証情報復号処理を担う。",
+            "usecases": [
+              "タスク登録メッセージ受信時の認証情報復号"
+            ],
+            "sub_systems": []
+          },
+          {
+            "name": "メッセージ保持管理サブシステム",
+            "description": "タスク登録・進捗ステータスメッセージの保持解除や空ペイロードメッセージの無視など、MQTTのretain運用管理を担う。",
+            "usecases": [
+              "タスク登録メッセージの保持解除",
+              "進捗ステータスメッセージの保持解除",
+              "空ペイロード保持解除メッセージの無視"
+            ],
+            "sub_systems": []
+          },
+          {
+            "name": "オフラインメッセージ管理サブシステム",
+            "description": "オフライン中のメッセージキューイングと再送処理を担う。",
+            "usecases": [
+              "オフライン中メッセージのキューイングと再送"
+            ],
+            "sub_systems": []
+          }
+        ]
+      },
+      {
+        "name": "コード生成・プロジェクト設定管理サブシステム",
+        "description": "AICodeBotによるコード生成リクエスト受信・処理、プロジェクト設定イベントの受信・キャッシュ管理、Gitリポジトリ連携など、プロジェクト資産とコード生成業務を担う。",
+        "usecases": [
+          "コード生成リクエストを送信する",
+          "コード生成リクエストを受信して処理する",
+          "コード生成受付時に初期ステータスを通知する",
+          "プロジェクト設定イベントを送信する",
+          "プロジェクト設定イベントを受信して設定キャッシュを再構築する",
+          "プロジェクト削除イベントを受信して設定キャッシュを削除する",
+          "Gitリポジトリと連携してコード生成関連処理を行う"
+        ],
+        "sub_systems": [
+          {
+            "name": "プロジェクト設定キャッシュ管理サブシステム",
+            "description": "プロジェクト設定イベント受信時のキャッシュ再構築・削除を担う。",
+            "usecases": [
+              "プロジェクト設定イベントを受信して設定キャッシュを再構築する",
+              "プロジェクト削除イベントを受信して設定キャッシュを削除する"
+            ],
+            "sub_systems": []
+          }
+        ]
+      },
+      {
+        "name": "MQTT通信・インフラ管理サブシステム",
+        "description": "MQTTブローカー接続、トピック購読、再接続・自動再購読、ワイルドカード購読、通信監視、エラーハンドリングなど、全コンポーネント共通のインフラ・通信基盤機能を担う。",
+        "usecases": [
+          "MQTTブローカーへ接続する",
+          "MQTTトピックを購読する",
+          "切断後にMQTT接続を自動再接続する",
+          "再接続後に購読を自動復旧する",
+          "ワイルドカードによるトピック購読",
+          "MQTT再接続時の自動再購読",
+          "MQTT接続監視と自動再接続",
+          "不正または解釈不能なメッセージをエラーとして処理する"
+        ],
+        "sub_systems": [
+          {
+            "name": "エラーハンドリングサブシステム",
+            "description": "不正メッセージの検知・ログ出力・例外保存・状態エラー更新など、通信・業務処理時の異常対応を担う。",
+            "usecases": [
+              "不正メッセージのエラー処理"
+            ],
+            "sub_systems": []
+          }
+        ]
+      }
+    ]
+  },
+  "activity_diagrams": {
+    "diagrams": [
+      {
+        "use_case_name": "進捗ステータスをWebSocketで配信する",
+        "diagram": [
+          "@startuml",
+          "title 進捗ステータスをWebSocketで配信する",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          "start",
+          ":MQTTブローカーから進捗ステータスメッセージを受信する;",
+          "if (メッセージが正しいStatusMessageか?) then (はい)",
+          "  :進捗ステータスメッセージを解析し、処理履歴ID・プロジェクトID・ステータスを抽出する;",
+          "  :接続中のWebSocketクライアント一覧を取得する;",
+          "  note right",
+          "    「進捗ステータスメッセージのWebSocket配信」サブユースケースを参照",
+          "  end note",
+          "  :進捗ステータスメッセージのWebSocket配信を実行する;",
+          "else (いいえ)",
+          "  :エラーログを出力し、処理を終了する;",
+          "endif",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク進捗ステータスを受信する",
+        "diagram": [
+          "@startuml",
+          "title タスク進捗ステータスを受信する",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          "start",
+          ":MQTTブローカーから進捗ステータスメッセージを受信する;",
+          "if (メッセージが正しいStatusMessageか?) then (はい)",
+          "  :進捗ステータスメッセージを解析し、処理履歴ID・プロジェクトID・ステータスを抽出する;",
+          "  note right",
+          "    「進捗ステータスメッセージのDB更新」サブユースケースを参照",
+          "  end note",
+          "  :進捗ステータスメッセージのDB更新を実行する;",
+          "  note right",
+          "    「進捗ステータスメッセージのWebSocket配信」サブユースケースを参照",
+          "  end note",
+          "  :進捗ステータスメッセージのWebSocket配信を実行する;",
+          "else (いいえ)",
+          "  :エラーログを出力し、処理を終了する;",
+          "endif",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "進捗ステータスメッセージのWebSocket配信",
+        "diagram": [
+          "@startuml",
+          "title 進捗ステータスメッセージのWebSocket配信",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          "start",
+          ":進捗ステータスメッセージを受信し、処理履歴ID・プロジェクトID・ステータスを抽出する;",
+          ":接続中のWebSocketクライアント一覧を取得する;",
+          "if (配信対象クライアントが存在するか?) then (はい)",
+          "  :各WebSocketクライアントへ進捗ステータスメッセージを送信する;",
+          "  :送信結果を確認し、失敗した場合はエラーログを出力する;",
+          "else (いいえ)",
+          "  :配信対象がいない場合は何もせず終了する;",
+          "endif",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "進捗ステータスメッセージのDB更新",
+        "diagram": [
+          "@startuml",
+          "title 進捗ステータスメッセージのDB更新",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          "start",
+          ":進捗ステータスメッセージを受信し、処理履歴ID・プロジェクトID・ステータスを抽出する;",
+          ":DBから対象プロジェクトまたは処理履歴のレコードを検索する;",
+          "if (該当レコードが存在するか?) then (はい)",
+          "  :レコードのステータスを受信した値に更新する;",
+          "  :DBへ更新内容を保存する;",
+          "  if (DB更新時にエラー発生?) then (はい)",
+          "    :エラーログを出力し、処理を終了する;",
+          "  else (いいえ)",
+          "    :正常にDB更新完了;",
+          "  endif",
+          "else (いいえ)",
+          "  :該当レコードがない場合はエラーログを出力する;",
+          "endif",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "オフライン中に蓄積したメッセージを再送する",
+        "diagram": [
+          "@startuml",
+          "title オフライン中に蓄積したメッセージを再送する",
+          "",
+          "|DocifyCodeGenerativeService|",
+          "start",
+          ":MQTT接続状態を監視する;",
+          "if (MQTT接続が切断されたか?) then (はい)",
+          "  :進捗ステータスメッセージや保持解除操作を送信できず、キューに蓄積する;",
+          "  :再接続待機;",
+          "  if (MQTT接続が復旧したか?) then (はい)",
+          "    :キューに蓄積された全メッセージを順次再送する;",
+          "    :各メッセージ送信結果を確認し、失敗した場合はエラーログを出力する;",
+          "    :キューをクリアする;",
+          "  else (いいえ)",
+          "    :再接続まで待機を継続する;",
+          "  endif",
+          "else (いいえ)",
+          "  :MQTT接続が維持されている場合は通常通りメッセージを送信する;",
+          "endif",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "完了した処理に対して次工程のタスクを自動登録する",
+        "diagram": [
+          "@startuml",
+          "title 完了した処理に対して次工程のタスクを自動登録する",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          "start",
+          ":進捗ステータスを受信する;",
+          ":受信したステータスが「completed」または「error」か判定;",
+          "if (completed または error?) then (はい)",
+          "  :generation_targetが生成連鎖対象か判定;",
+          "  if (生成連鎖対象?) then (はい)",
+          "    :次工程のgeneration_targetを決定;",
+          "    :次工程用のprocess_history_idを生成;",
+          "    :次工程のタスク登録メッセージを作成;",
+          "    :タスク登録メッセージをMQTTブローカーへpublish（QoS2, retain=true）;",
+          "  else (いいえ)",
+          "    :次工程のタスク登録は行わない;",
+          "  endif",
+          "else (いいえ)",
+          "  :次工程のタスク登録は行わない;",
+          "endif",
+          "stop",
+          "",
+          "|Mosquittoブローカー|",
+          ":タスク登録メッセージを受信し、該当トピックに保持;",
+          "",
+          "|DocifyCodeGenerativeService|",
+          ":タスク登録メッセージをsubscribeし、生成処理を開始;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録受信後に登録メッセージの保持を解除する",
+        "diagram": [
+          "@startuml",
+          "title タスク登録受信後に登録メッセージの保持を解除する",
+          "",
+          "|DocifyCodeGenerativeService|",
+          "start",
+          ":MQTTブローカーからタスク登録メッセージを受信;",
+          ":メッセージ内容を検証（スキーマ・必須項目チェック）;",
+          "if (検証成功?) then (はい)",
+          "  :生成処理を開始;",
+          "  :タスク登録メッセージの保持解除を実施;",
+          "  :空ペイロードのメッセージをMQTTブローカーへpublish（retain=true, 該当トピック）;",
+          "else (いいえ)",
+          "  :エラーとして処理;",
+          "  :エラー内容をログ出力;",
+          "endif",
+          "stop",
+          "",
+          "|Mosquittoブローカー|",
+          ":空ペイロード受信時、該当トピックの保持メッセージを削除;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "完了またはエラー時に保持メッセージを削除する",
+        "diagram": [
+          "@startuml",
+          "title 完了またはエラー時に保持メッセージを削除する",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          "start",
+          ":進捗ステータスを受信する;",
+          ":ステータスが「completed」または「error」か判定;",
+          "if (completed または error?) then (はい)",
+          "  :空ペイロードのメッセージをMQTTブローカーへpublish（retain=true, statusトピック）;",
+          "else (いいえ)",
+          "  :保持削除は行わない;",
+          "endif",
+          "stop",
+          "",
+          "|DocifyCodeGenerativeService|",
+          ":生成処理完了時または異常終了時、空ペイロードのメッセージをMQTTブローカーへpublish（retain=true, statusトピック）;",
+          "",
+          "|Mosquittoブローカー|",
+          ":空ペイロード受信時、該当トピックの保持メッセージを削除;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "生成処理の進捗ステータスを送信する",
+        "diagram": [
+          "@startuml",
+          "title 生成処理の進捗ステータスを送信する",
+          "",
+          "|DocifyCodeGenerativeService|",
+          "start",
+          ":生成処理開始時、進捗ステータス（pending）を作成;",
+          ":MQTTブローカーへStatusMessageをpublish（QoS2, retain=true, statusトピック）;",
+          ":生成処理を進行;",
+          "repeat",
+          "  :進捗ステータス（generating等）を作成;",
+          "  :MQTTブローカーへStatusMessageをpublish（QoS2, retain=true, statusトピック）;",
+          "repeat while (処理進行中)",
+          "if (処理完了?) then (completed)",
+          "  :進捗ステータス（completed）を作成;",
+          "  :MQTTブローカーへStatusMessageをpublish（QoS2, retain=true, statusトピック）;",
+          "elseif (異常終了?) then (error)",
+          "  :進捗ステータス（error）を作成;",
+          "  :MQTTブローカーへStatusMessageをpublish（QoS2, retain=true, statusトピック）;",
+          "elseif (キャンセル?) then (canceled)",
+          "  :進捗ステータス（canceled）を作成;",
+          "  :MQTTブローカーへStatusMessageをpublish（QoS2, retain=true, statusトピック）;",
+          "endif",
+          "stop",
+          "",
+          "|AICodeBot|",
+          ":コード生成処理やプロジェクト設定処理の進捗ステータスを作成し、MQTTブローカーへpublish;",
+          "",
+          "|Mosquittoブローカー|",
+          ":StatusMessageを該当トピックに保持;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録メッセージを受信して生成処理を開始する",
+        "diagram": [
+          "@startuml",
+          "title タスク登録メッセージを受信して生成処理を開始する",
+          "",
+          "|DocifyCodeGenerativeService|",
+          "start",
+          ":MQTTブローカーからタスク登録メッセージを受信;",
+          ":メッセージ内容を検証（スキーマ・必須項目チェック）;",
+          "if (検証成功?) then (はい)",
+          "  :generation_targetに応じた生成処理を決定;",
+          "  :必要なオプションや認証情報を復号・準備;",
+          "  :生成処理をバックグラウンドで開始;",
+          "  :進捗ステータス（pending）を送信;",
+          "  :生成処理の進捗ステータスを送信する;",
+          "  note right: 「生成処理の進捗ステータスを送信する」ユースケースのアクティビティ図を参照",
+          "else (いいえ)",
+          "  :エラーとして処理;",
+          "  :エラー内容をログ出力;",
+          "  :進捗ステータス（error）を送信;",
+          "endif",
+          "stop",
+          "",
+          "|Mosquittoブローカー|",
+          ":StatusMessageを該当トピックに保持;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "プロジェクト設定イベントを受信して設定キャッシュを再構築する",
+        "diagram": [
+          "@startuml",
+          "title プロジェクト設定イベントを受信して設定キャッシュを再構築する",
+          "",
+          "|AICodeBot|",
+          "start",
+          ":MQTTブローカーからプロジェクト設定イベントを受信する;",
+          ":受信したイベントメッセージをJSONデコードし、Pydanticスキーマでバリデーションする;",
+          "if (イベントタイプは new または edit か?) then (はい)",
+          "  :対象プロジェクトIDを抽出する;",
+          "  :プロジェクト設定情報を再取得または再構築する;",
+          "  :内部キャッシュに最新の設定情報を反映する;",
+          "  :キャッシュ更新後、後続のコード生成やGit連携処理が最新設定に基づいて実行可能となる;",
+          "else (いいえ)",
+          "  if (イベントタイプは delete か?) then (はい)",
+          "    :対象プロジェクトの設定キャッシュを削除する;",
+          "    :不要なプロジェクト設定を内部保持から除去する;",
+          "  else (その他)",
+          "    :イベントタイプが不正な場合、エラーとしてログ出力し処理を終了する;",
+          "  endif",
+          "endif",
+          "stop",
+          "",
+          "|Mosquittoブローカー|",
+          ":プロジェクト設定イベントメッセージをAICodeBotへ配信する;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "プロジェクト設定イベントを送信する",
+        "diagram": [
+          "@startuml",
+          "title プロジェクト設定イベントを送信する",
+          "",
+          "|ユーザー|",
+          "start",
+          ":プロジェクトの新規作成・編集・削除操作を実施する;",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          ":ユーザー操作を受けてプロジェクト設定イベントメッセージを生成する;",
+          ":イベントタイプ（new/edit/delete）、プロジェクトIDをメッセージに含める;",
+          ":メッセージをPydanticスキーマでバリデーションする;",
+          ":MQTTブローカーの /docifycode/gitinfo/{project_id} トピックへpublishする;",
+          "note right",
+          "MQTT publish時はQoS=2、retain=Falseで送信",
+          "end note",
+          "",
+          "|Mosquittoブローカー|",
+          ":受信したプロジェクト設定イベントメッセージをAICodeBotへ配信する;",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "コード生成受付時に初期ステータスを通知する",
+        "diagram": [
+          "@startuml",
+          "title コード生成受付時に初期ステータスを通知する",
+          "",
+          "|AICodeBot|",
+          "start",
+          ":MQTTブローカーからコード生成リクエストメッセージを受信する;",
+          ":受信したメッセージをJSONデコードし、Pydanticスキーマでバリデーションする;",
+          "if (generation_targetがcode_from_detailed_designか?) then (はい)",
+          "  :コード生成リクエストを受理する;",
+          "  :処理開始前の初期状態としてStatusMessage（status=pending）を生成する;",
+          "  :StatusMessageをMQTTブローカーの /docifycode/status/{process_history_id} トピックへpublishする;",
+          "  note right",
+          "  publish時はQoS=2、retain=Trueで送信",
+          "  end note",
+          "else (いいえ)",
+          "  :対応しないgeneration_targetの場合はリクエストを無視する;",
+          "endif",
+          "stop",
+          "",
+          "|Mosquittoブローカー|",
+          ":StatusMessage（pending）を依頼元や関連コンポーネントへ配信する;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "コード生成リクエストを受信して処理する",
+        "diagram": [
+          "@startuml",
+          "title コード生成リクエストを受信して処理する",
+          "",
+          "|AICodeBot|",
+          "start",
+          ":MQTTブローカーからコード生成リクエストメッセージを受信する;",
+          ":受信したメッセージをJSONデコードし、Pydanticスキーマでバリデーションする;",
+          "if (generation_targetがcode_from_detailed_designか?) then (はい)",
+          "  :コード生成リクエストを受理する;",
+          "  :初期ステータス通知（pending）を行う;",
+          "  note right",
+          "  「コード生成受付時に初期ステータスを通知する」のアクティビティ図を参照",
+          "  end note",
+          "  :プロジェクト設定キャッシュを参照し、必要な情報を取得する;",
+          "  :Gitリポジトリ連携や詳細設計データを取得する;",
+          "  :指定されたブランチ・言語に基づきコード生成処理を実行する;",
+          "  :処理進行中は適宜StatusMessage（generating等）をpublishする;",
+          "  :処理完了時はStatusMessage（completed）をpublishする;",
+          "  :異常発生時はStatusMessage（error）をpublishし、エラー内容をログ出力する;",
+          "else (いいえ)",
+          "  :対応しないgeneration_targetの場合はリクエストを無視する;",
+          "endif",
+          "stop",
+          "",
+          "|Mosquittoブローカー|",
+          ":StatusMessage（generating/completed/error）を依頼元や関連コンポーネントへ配信する;",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "コード生成リクエストを送信する",
+        "diagram": [
+          "@startuml",
+          "title コード生成リクエストを送信する",
+          "",
+          "|ユーザー|",
+          "start",
+          ":コード生成を依頼する操作を実施する;",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          ":ユーザー操作を受けてコード生成リクエストメッセージを生成する;",
+          ":対象プロジェクトID、処理履歴ID、対象ブランチ、対象言語をメッセージに含める;",
+          ":メッセージをPydanticスキーマでバリデーションする;",
+          ":MQTTブローカーの /docifycode/code/{process_history_id} トピックへpublishする;",
+          "note right",
+          "MQTT publish時はQoS=2、retain=Falseで送信",
+          "end note",
+          "",
+          "|Mosquittoブローカー|",
+          ":受信したコード生成リクエストメッセージをAICodeBotへ配信する;",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "Gitリポジトリと連携してコード生成関連処理を行う",
+        "diagram": [
+          "@startuml",
+          "|AICodeBot|",
+          "title Gitリポジトリと連携してコード生成関連処理を行う",
+          "",
+          "start",
+          "",
+          ":MQTTブローカーからコード生成要求またはプロジェクト設定イベントを受信;",
+          "",
+          "if (受信メッセージはコード生成要求か?) then (はい)",
+          "  :コード生成要求内容を検証;",
+          "  if (プロジェクト設定キャッシュが存在するか?) then (はい)",
+          "    :対象プロジェクトの設定情報を取得;",
+          "    :Gitリポジトリへの接続情報を準備;",
+          "    |Gitリポジトリ|",
+          "    :Gitリポジトリへアクセス（クローン/フェッチ等）;",
+          "    |AICodeBot|",
+          "    :必要なソース資産を取得;",
+          "    :コード生成処理を実行;",
+          "    :生成結果をGitリポジトリへ反映（コミット/プッシュ等）;",
+          "    |Gitリポジトリ|",
+          "    :リポジトリへ変更を反映;",
+          "    |AICodeBot|",
+          "    :進捗ステータスをMQTTブローカーへ送信;",
+          "  else (いいえ)",
+          "    :エラーとして進捗ステータスをMQTTブローカーへ送信;",
+          "  endif",
+          "else if (受信メッセージはプロジェクト設定イベントか?) then (はい)",
+          "  :イベント種別を判定;",
+          "  if (新規または編集イベントか?) then (はい)",
+          "    :プロジェクト設定キャッシュを再構築;",
+          "    :必要に応じてGitリポジトリ情報を再取得;",
+          "  else if (削除イベントか?) then (はい)",
+          "    :プロジェクト設定キャッシュを削除;",
+          "  endif",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "プロジェクト削除イベントを受信して設定キャッシュを削除する",
+        "diagram": [
+          "@startuml",
+          "|AICodeBot|",
+          "title プロジェクト削除イベントを受信して設定キャッシュを削除する",
+          "",
+          "start",
+          "",
+          ":MQTTブローカーからプロジェクト削除イベントを受信;",
+          "",
+          ":イベント内容を検証;",
+          "",
+          "if (イベント種別がdeleteか?) then (はい)",
+          "  :対象プロジェクトIDを抽出;",
+          "  :設定キャッシュに該当プロジェクトが存在するか確認;",
+          "  if (キャッシュが存在するか?) then (はい)",
+          "    :該当プロジェクトの設定キャッシュを削除;",
+          "    :削除ログを記録;",
+          "  else (いいえ)",
+          "    :何もせず終了;",
+          "  endif",
+          "else (いいえ)",
+          "  :他のイベント種別のため本処理を行わない;",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "永続セッションによる進捗ステータスの取りこぼし防止",
+        "diagram": [
+          "@startuml",
+          "|DocifyCodeFrontendBackend|",
+          "|Mosquittoブローカー|",
+          "title 永続セッションによる進捗ステータスの取りこぼし防止",
+          "",
+          "start",
+          "",
+          ":MQTTブローカーへclean_session=Falseで接続要求;",
+          "",
+          ":永続セッションの確立を要求;",
+          "",
+          "|Mosquittoブローカー|",
+          "if (既存セッションが存在するか?) then (はい)",
+          "  :切断中に蓄積された進捗ステータスメッセージを保持;",
+          "  :再接続時に未配信メッセージをキューから送信;",
+          "else (いいえ)",
+          "  :新規セッションを作成;",
+          "endif",
+          "",
+          "|DocifyCodeFrontendBackend|",
+          ":進捗ステータストピックをsubscribe;",
+          "",
+          ":MQTTブローカーから進捗ステータスメッセージを受信;",
+          "",
+          ":受信した進捗ステータスをDBへ永続化;",
+          "",
+          ":WebSocket経由でクライアントへ配信;",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "空ペイロードの保持解除メッセージを無視する",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title 空ペイロードの保持解除メッセージを無視する",
+          "",
+          "start",
+          "",
+          ":MQTTブローカーからメッセージを受信;",
+          "",
+          "if (メッセージのペイロードが空か?) then (はい)",
+          "  :保持解除目的の空メッセージと判定;",
+          "  :通常の業務処理を行わずに即return;",
+          "  :何もせず終了;",
+          "else (いいえ)",
+          "  :通常の業務メッセージとして処理を継続;",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+        "diagram": [
+          "@startuml",
+          "title 永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+          "",
+          "|Frontend Backend|",
+          "start",
+          ":MQTTブローカーへの接続パラメータを取得（ホスト、ポート、client_id、clean_session=False）;",
+          ":MQTTクライアントを永続セッションモードで初期化;",
+          ":MQTTブローカーへ接続を試行;",
+          "if (接続成功?) then (yes)",
+          "  :進捗ステータス用トピックを購読開始;",
+          "else (no)",
+          "  :指数バックオフで再接続をリトライ;",
+          "  repeat",
+          "    :再接続を試行;",
+          "    if (接続成功?) then (yes)",
+          "      :進捗ステータス用トピックを購読開始;",
+          "    else (no)",
+          "      :再接続リトライ;",
+          "    endif",
+          "  repeat while (接続失敗)",
+          "endif",
+          "",
+          ":MQTTクライアントの接続状態を監視（定期的に確認）;",
+          "if (切断検知?) then (yes)",
+          "  :永続セッションのため、切断中もサーバー側でセッション維持;",
+          "  :再接続を自動的に試行;",
+          "  :再接続成功時、切断前に購読していたトピックを自動再購読;",
+          "  :オフライン中に発生した進捗ステータスメッセージをブローカーから受信;",
+          "  :進捗ステータスの取りこぼしを防止;",
+          "else (no)",
+          "  :通常運用を継続;",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "進捗ステータスを永続化する",
+        "diagram": [
+          "@startuml",
+          "title 進捗ステータスを永続化する",
+          "",
+          "|Mosquittoブローカー|",
+          "start",
+          ":進捗ステータスメッセージを受信（/docifycode/status/{process_history_id}）;",
+          "|Frontend Backend|",
+          ":受信した進捗ステータスメッセージを検証（JSONデコード、スキーマバリデーション）;",
+          "if (メッセージが正当?) then (yes)",
+          "  :対象プロジェクトまたは処理履歴IDを抽出;",
+          "  :進捗ステータス（pending, generating, completed, error, canceled）を取得;",
+          "  :進捗ステータスメッセージのDB更新;",
+          "  note right",
+          "    「進捗ステータスメッセージのDB更新」サブユースケースを参照",
+          "  end note",
+          "  :DBに最新状態を永続化（履歴・状態を保存）;",
+          "  :後続参照や通知に利用可能な状態を維持;",
+          "else (no)",
+          "  :エラーとして処理（ログ出力、例外記録、状態をerrorへフォールバック）;",
+          "endif",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録時のGit認証情報を暗号化して送信する",
+        "diagram": [
+          "@startuml",
+          "title タスク登録時のGit認証情報を暗号化して送信する",
+          "",
+          "|ユーザー|",
+          "start",
+          ":タスク登録画面でGit連携に必要な認証情報（トークン/パスワード）を入力;",
+          "|Frontend Backend|",
+          ":タスク登録メッセージ生成処理を開始;",
+          "if (Git認証情報が入力されている?) then (yes)",
+          "  :Git認証情報を暗号化処理へ渡す;",
+          "  :暗号化済みデータを取得;",
+          "  note right",
+          "    「タスク登録メッセージの暗号化フィールド生成」サブユースケースを参照",
+          "  end note",
+          "  :暗号化済みGit認証情報をタスク登録メッセージに含める;",
+          "else (no)",
+          "  :Git認証情報フィールドは空欄のままメッセージ生成;",
+          "endif",
+          ":タスク登録メッセージをMQTTブローカーへ送信;",
+          "|Mosquittoブローカー|",
+          ":タスク登録メッセージを受信し、後続サービスへ配信;",
+          "|Gitリポジトリ|",
+          "if (後続処理でGit連携が必要?) then (yes)",
+          "  :暗号化済み認証情報を復号し、Gitリポジトリ操作に利用;",
+          "else (no)",
+          "  :Git連携処理なし;",
+          "endif",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録メッセージの暗号化フィールド生成",
+        "diagram": [
+          "@startuml",
+          "title タスク登録メッセージの暗号化フィールド生成",
+          "",
+          "|Frontend Backend|",
+          "start",
+          ":Git認証情報（トークン/パスワード）を受け取る;",
+          ":暗号化鍵（ENCRYPTION_KEY）を取得（環境変数から）;",
+          "if (暗号化鍵が設定されている?) then (yes)",
+          "  :AES-256-GCM方式でGit認証情報を暗号化;",
+          "  :ノンス（12byte）と暗号文をbase64化;",
+          "  :暗号化済みデータを生成;",
+          "else (no)",
+          "  :デフォルト鍵で暗号化（要改善点としてログ出力）;",
+          "  :暗号化済みデータを生成;",
+          "endif",
+          ":暗号化済みGit認証情報をタスク登録メッセージのtoken_passwordフィールドにセット;",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録メッセージを送信する",
+        "diagram": [
+          "@startuml",
+          "title タスク登録メッセージを送信する",
+          "",
+          "|ユーザー|",
+          "start",
+          ":タスク登録画面で対象プロジェクト、生成対象、任意オプション、Git認証情報を入力;",
+          ":タスク登録要求を送信（UI操作）;",
+          "|Frontend Backend|",
+          ":入力内容を受け取り、タスク登録メッセージ生成処理を開始;",
+          "if (Git認証情報が入力されている?) then (yes)",
+          "  :Git認証情報の暗号化処理を実行;",
+          "  note right",
+          "    「タスク登録時のGit認証情報を暗号化して送信する」サブユースケースを参照",
+          "  end note",
+          "endif",
+          ":process_history_id, project_id, generation_target, task_options, revision_number, user_name, token_password（暗号化済み）を含むタスク登録メッセージを作成;",
+          ":メッセージをMQTTブローカーの /docifycode/TaskRegistration/{process_history_id} トピックへpublish（QoS=2, retain=true）;",
+          "|Mosquittoブローカー|",
+          ":タスク登録メッセージを受信し、生成処理サービスへ配信;",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "不正または解釈不能なメッセージをエラーとして処理する",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title 不正または解釈不能なメッセージをエラーとして処理する",
+          "",
+          "start",
+          "",
+          ":MQTTメッセージを受信する;",
+          "",
+          "if (メッセージペイロードが空か?) then (Yes)",
+          "  :保持解除用の空メッセージとして無視する;",
+          "  stop",
+          "else (No)",
+          "  :メッセージをJSONとしてデコードする;",
+          "  if (JSONデコードに失敗?) then (Yes)",
+          "    :エラーログを出力;",
+          "    :例外情報を保存;",
+          "    :必要に応じてDBへ例外記録;",
+          "    :該当処理の状態をerrorへ更新;",
+          "    stop",
+          "  else (No)",
+          "    :Pydanticスキーマでバリデーションする;",
+          "    if (バリデーション失敗?) then (Yes)",
+          "      :エラーログを出力;",
+          "      :例外情報を保存;",
+          "      :必要に応じてDBへ例外記録;",
+          "      :該当処理の状態をerrorへ更新;",
+          "      stop",
+          "    else (No)",
+          "      :通常の業務処理を実行;",
+          "      if (業務処理中に例外発生?) then (Yes)",
+          "        :エラーログを出力;",
+          "        :例外情報を保存;",
+          "        :必要に応じてDBへ例外記録;",
+          "        :該当処理の状態をerrorへ更新;",
+          "        stop",
+          "      else (No)",
+          "        :処理正常終了;",
+          "        stop",
+          "      endif",
+          "    endif",
+          "  endif",
+          "endif",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "再接続後に購読を自動復旧する",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title 再接続後に購読を自動復旧する",
+          "",
+          "start",
+          "",
+          ":MQTT接続が切断状態か監視する;",
+          "",
+          "if (再接続が発生?) then (Yes)",
+          "  :MQTT接続が再確立されたことを検知;",
+          "  :切断前に購読していたトピック一覧を取得;",
+          "  :各トピックについて再度subscribeを実行;",
+          "  :再購読が成功したか確認;",
+          "  if (再購読失敗したトピックあり?) then (Yes)",
+          "    :エラーログを出力;",
+          "    :再試行または管理者へ通知;",
+          "  else (No)",
+          "    :全トピックの購読復旧完了;",
+          "  endif",
+          "  stop",
+          "else (No)",
+          "  :MQTT接続状態を継続監視;",
+          "  stop",
+          "endif",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "切断後にMQTT接続を自動再接続する",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title 切断後にMQTT接続を自動再接続する",
+          "",
+          "start",
+          "",
+          ":MQTT接続状態を監視;",
+          "",
+          "if (切断を検知?) then (Yes)",
+          "  :自動再接続フラグを確認;",
+          "  if (自動再接続有効?) then (Yes)",
+          "    :指数バックオフで再接続を試行;",
+          "    repeat",
+          "      :MQTTブローカーへ接続を試みる;",
+          "      if (接続成功?) then (Yes)",
+          "        :接続成功ログを出力;",
+          "        :再接続後の初期化処理へ;",
+          "        break",
+          "      else (No)",
+          "        :再接続待機（バックオフ）;",
+          "      endif",
+          "    repeat while (接続成功しない and 最大試行回数未満)",
+          "    if (最大試行回数超過?) then (Yes)",
+          "      :エラーログを出力;",
+          "      :管理者へ通知;",
+          "      stop",
+          "    endif",
+          "  else (No)",
+          "    :手動再接続待ち;",
+          "    stop",
+          "  endif",
+          "else (No)",
+          "  :MQTT接続状態を継続監視;",
+          "  stop",
+          "endif",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "MQTTトピックを購読する",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title MQTTトピックを購読する",
+          "",
+          "start",
+          "",
+          ":購読対象のトピック種別を決定;",
+          ":購読するトピックリストを生成",
+          "  - タスク登録",
+          "  - 進捗ステータス",
+          "  - コード生成要求",
+          "  - プロジェクト設定イベント;",
+          "",
+          ":各トピックについて",
+          "repeat",
+          "  :MQTTクライアントでsubscribeを実行（QoS 2）;",
+          "  :ワイルドカード購読が必要な場合は+を利用;",
+          "repeat while (全トピック分繰り返し)",
+          "",
+          ":購読成功を確認;",
+          "if (購読失敗したトピックあり?) then (Yes)",
+          "  :エラーログを出力;",
+          "  :再試行または管理者へ通知;",
+          "else (No)",
+          "  :購読状態を維持;",
+          "endif",
+          "",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "MQTTブローカーへ接続する",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title MQTTブローカーへ接続する",
+          "",
+          "start",
+          "",
+          ":MQTT接続パラメータを取得;",
+          "  - ホスト",
+          "  - ポート",
+          "  - クライアントID",
+          "  - QoS",
+          "  - Keepalive",
+          "  - 認証情報（空欄）",
+          "",
+          ":MQTTクライアントインスタンスを生成;",
+          ":clean_sessionフラグを設定（コンポーネントにより異なる）;",
+          ":MQTTブローカーへ接続を試行;",
+          "",
+          "if (接続成功?) then (Yes)",
+          "  :接続成功ログを出力;",
+          "  :メッセージ送受信の準備完了;",
+          "  stop",
+          "else (No)",
+          "  :エラーログを出力;",
+          "  :指数バックオフで再試行;",
+          "  repeat",
+          "    :再接続を試みる;",
+          "    if (接続成功?) then (Yes)",
+          "      :接続成功ログを出力;",
+          "      :メッセージ送受信の準備完了;",
+          "      break",
+          "    else (No)",
+          "      :再接続待機（バックオフ）;",
+          "    endif",
+          "  repeat while (接続成功しない and 最大試行回数未満)",
+          "  if (最大試行回数超過?) then (Yes)",
+          "    :エラーログを出力;",
+          "    :管理者へ通知;",
+          "    stop",
+          "  endif",
+          "endif",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "オフライン中メッセージのキューイングと再送",
+        "diagram": [
+          "@startuml",
+          "|生成処理サービス|",
+          "title オフライン中メッセージのキューイングと再送",
+          "",
+          "start",
+          "",
+          ":MQTTブローカーへの接続状態を監視;",
+          "",
+          "if (MQTT接続が切断されたか?) then (はい)",
+          "  :進捗ステータスメッセージや保持解除操作を送信しようとした場合;",
+          "  :送信できなかったメッセージを内部キューに追加;",
+          "  repeat",
+          "    :MQTT接続状態を定期的に監視;",
+          "  repeat while (MQTT未接続)",
+          "endif",
+          "",
+          "if (MQTT再接続に成功?) then (はい)",
+          "  :内部キューに蓄積されたメッセージがあるか確認;",
+          "  if (キューが空?) then (いいえ)",
+          "    :キュー内の全メッセージを順次MQTTブローカーへ送信;",
+          "    :送信成功したメッセージをキューから削除;",
+          "    repeat",
+          "      :次のメッセージがあるか確認;",
+          "    repeat while (メッセージあり)",
+          "  endif",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "空ペイロード保持解除メッセージの無視",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title 空ペイロード保持解除メッセージの無視",
+          "",
+          "start",
+          "",
+          ":MQTTメッセージを受信;",
+          "",
+          "if (受信メッセージのペイロードが空?) then (はい)",
+          "  :保持解除目的の空メッセージと判定;",
+          "  :通常の業務処理を行わずに即return;",
+          "  stop",
+          "else (いいえ)",
+          "  :通常の業務メッセージとして後続処理へ進む;",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "進捗ステータスメッセージの保持解除",
+        "diagram": [
+          "@startuml",
+          "|システム|",
+          "title 進捗ステータスメッセージの保持解除",
+          "",
+          "start",
+          "",
+          ":タスクの進捗ステータスを監視;",
+          "",
+          "if (ステータスが completed または error になったか?) then (はい)",
+          "  :該当トピック（/docifycode/status/{process_history_id}）に対し;",
+          "  :空ペイロードのメッセージを retain=true でMQTTブローカーへpublish;",
+          "  :進捗ステータスメッセージ（retained message）を削除;",
+          "else (いいえ)",
+          "  :保持解除処理は行わない;",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録メッセージの保持解除",
+        "diagram": [
+          "@startuml",
+          "|生成処理サービス|",
+          "title タスク登録メッセージの保持解除",
+          "",
+          "start",
+          "",
+          ":タスク登録メッセージを受信;",
+          ":タスク登録内容を検証し、処理開始を確定;",
+          "",
+          ":該当トピック（/docifycode/TaskRegistration/{process_history_id}）に対し;",
+          ":空ペイロードのメッセージを retain=true でMQTTブローカーへpublish;",
+          ":タスク登録メッセージ（retained message）を削除;",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "タスク登録メッセージ受信時の認証情報復号",
+        "diagram": [
+          "@startuml",
+          "|生成処理サービス|",
+          "title タスク登録メッセージ受信時の認証情報復号",
+          "",
+          "start",
+          "",
+          ":タスク登録メッセージを受信;",
+          "",
+          "if (token_password フィールドが存在するか?) then (はい)",
+          "  :暗号化されたtoken_passwordを取得;",
+          "  :共通暗号化モジュールでAES-256-GCM復号を実行;",
+          "  if (復号成功?) then (はい)",
+          "    :平文のGit認証情報として復号値を取得;",
+          "    :生成処理サービス内で認証情報を利用可能にする;",
+          "  else (いいえ)",
+          "    :復号エラーをログ出力;",
+          "    :認証情報なしとして処理を継続またはエラー処理;",
+          "  endif",
+          "else (いいえ)",
+          "  :認証情報なしとして処理を継続;",
+          "endif",
+          "",
+          "stop",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "不正メッセージのエラー処理",
+        "diagram": [
+          "@startuml",
+          "title 不正メッセージのエラー処理",
+          "",
+          "|受信処理スイムレーン|",
+          "start",
+          ":MQTTブローカーからメッセージを受信する;",
+          ":メッセージペイロードを取得する;",
+          "",
+          "|検証スイムレーン|",
+          "if (ペイロードが空か?) then (Yes)",
+          "  :業務処理を行わずに無視する;",
+          "  stop",
+          "else (No)",
+          "  :JSONデコードを試みる;",
+          "  if (JSONデコード成功?) then (Yes)",
+          "    :Pydanticスキーマでバリデーションを実施;",
+          "    if (スキーマバリデーション成功?) then (Yes)",
+          "      :通常処理へ進む;",
+          "      stop",
+          "    else (No)",
+          "      :バリデーションエラーを検知;",
+          "      :エラー内容をログ出力;",
+          "      :例外情報をDB等に保存;",
+          "      :対象処理の状態を「error」に更新;",
+          "      stop",
+          "    endif",
+          "  else (No)",
+          "    :JSONデコードエラーを検知;",
+          "    :エラー内容をログ出力;",
+          "    :例外情報をDB等に保存;",
+          "    :対象処理の状態を「error」に更新;",
+          "    stop",
+          "  endif",
+          "endif",
+          "",
+          "|業務処理スイムレーン|",
+          "note right",
+          "通常処理に進む場合は、受信メッセージに応じた業務処理を実行する。",
+          "エラーの場合は、状態を「error」にフォールバックし、異常を可視化する。",
+          "end note",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "MQTT接続監視と自動再接続",
+        "diagram": [
+          "@startuml",
+          "title MQTT接続監視と自動再接続",
+          "",
+          "|接続監視スイムレーン|",
+          "start",
+          ":MQTTクライアントの接続状態を監視する;",
+          "repeat",
+          "  :一定間隔で接続状態をチェック;",
+          "  if (接続が切断されているか?) then (Yes)",
+          "    :切断イベントを検知;",
+          "    :WARNログを出力;",
+          "    |再接続スイムレーン|",
+          "    :自動再接続を試みる;",
+          "    :指数バックオフで再接続リトライ;",
+          "    if (再接続成功?) then (Yes)",
+          "      :接続成功コールバックを実行;",
+          "      stop",
+          "    else (No)",
+          "      :最大リトライ回数まで再試行;",
+          "      :再接続失敗時はエラーをログ出力;",
+          "      stop",
+          "    endif",
+          "  else (No)",
+          "    :接続維持中;",
+          "  endif",
+          "repeat while (システム稼働中)",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "MQTT再接続時の自動再購読",
+        "diagram": [
+          "@startuml",
+          "title MQTT再接続時の自動再購読",
+          "",
+          "|再接続スイムレーン|",
+          "start",
+          ":MQTTブローカーへの再接続が成功する;",
+          ":接続成功コールバックを受ける;",
+          "",
+          "|購読復旧スイムレーン|",
+          ":切断前に購読していたトピック一覧を取得;",
+          ":各トピックに対して再subscribeを実行;",
+          "if (ワイルドカード購読が含まれるか?) then (Yes)",
+          "  :ワイルドカード購読も再度実行;",
+          "endif",
+          ":再購読完了後、イベント受信状態を回復;",
+          "stop",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      },
+      {
+        "use_case_name": "ワイルドカードによるトピック購読",
+        "diagram": [
+          "@startuml",
+          "title ワイルドカードによるトピック購読",
+          "",
+          "|購読要求スイムレーン|",
+          "start",
+          ":MQTTトピック購読要求を受ける;",
+          "if (メッセージIDが未指定か?) then (Yes)",
+          "  :トピックのプレースホルダ部分を検出;",
+          "  :単一階層ワイルドカード「+」に置換;",
+          "  :ワイルドカード付きトピック文字列を生成;",
+          "else (No)",
+          "  :指定されたトピック文字列をそのまま使用;",
+          "endif",
+          "",
+          "|MQTTクライアントスイムレーン|",
+          ":MQTTクライアントでsubscribeを実行;",
+          ":QoS 2で購読開始;",
+          ":購読成功時、受信コールバックを登録;",
+          "if (複数トピックパターンに一致?) then (Yes)",
+          "  :例外を送出し、エラーをログ出力;",
+          "  stop",
+          "else (No)",
+          "  :対象トピックのメッセージを継続的に受信;",
+          "  stop",
+          "endif",
+          "",
+          "@enduml"
+        ],
+        "file_id": null
+      }
+    ]
+  },
+  "screen_transition_diagram": {
+    "screen_dict": null,
+    "screen_flow_diagram": null,
+    "annotations": null
+  },
+  "screen_design": {
+    "screen_designs": []
+  },
+  "database_design_data": {
+    "table_descriptions": [],
+    "er_diagram": []
+  },
+  "interface_design": {
+    "auth_methods": [
+      "インターフェース設計ドキュメント",
+      "",
+      "---",
+      "",
+      "### 認証・認可",
+      "",
+      "#### 認証方式",
+      "",
+      "- 本システムのMQTTインターフェースおよびWebSocketインターフェースは、**認証不要（匿名アクセス）**で運用されている。",
+      "    - MQTTブローカー（Eclipse Mosquitto）は `allow_anonymous true` 設定で稼働し、`MQTT_USERNAME` および `MQTT_PASSWORD` は全環境で空欄運用。",
+      "    - WebSocket（/ws/status/{process_history_id}）も認証不要で接続可能。",
+      "- 認証メカニズム（フォーム認証、OAuth2、JWT、APIキー、Basic認証等）は**一切実装されていない**。",
+      "- ログイン画面やトークン発行・管理、セッションIDの発行・検証等の処理フローは存在しない。",
+      "- トークンやシークレットのライフサイクル管理（有効期限、リフレッシュ等）も未実装。",
+      "",
+      "#### 認可制御",
+      "",
+      "- **認可制御（スコープ、ロール、RBAC/ABAC等）は未実装**。",
+      "- すべてのエンドポイント（MQTTトピック、WebSocket）は認証・認可なしでアクセス可能。",
+      "- 未認証・未認可時の特別な挙動（リダイレクト、エラー返却等）は存在しない。",
+      "",
+      "#### 補足・ポリシーまとめ",
+      "",
+      "- **認証不要なエンドポイント一覧**",
+      "    - MQTTインターフェース（/docifycode/status/{process_history_id}、/docifycode/TaskRegistration/{process_history_id}、/docifycode/code/{process_history_id}、/docifycode/gitinfo/{project_id} など全トピック）",
+      "    - WebSocketインターフェース（/ws/status/{process_history_id}）",
+      "- **常に認証が必要なエンドポイントは存在しない**",
+      "- **ロールベースアクセス制御は未実装**",
+      "- **仕様書・要件定義に認証・認可に関する追加情報は記載されていない**",
+      "",
+      "---",
+      "",
+      "### その他連携インターフェース",
+      "",
+      "#### ファイル連携仕様",
+      "",
+      "- 本システムにおいて、ファイル連携（ファイルフォーマット、配置場所、スケジュール、エラー処理等）は**仕様書上定義されていない**。",
+      "",
+      "#### メッセージキュー仕様（MQTT）",
+      "",
+      "- **ブローカー**: Eclipse Mosquitto（Dockerコンテナ、`allow_anonymous true`、TLS/ACL未設定）",
+      "- **トピック一覧・用途・メッセージ型**",
+      "",
+      "    | トピックパターン | 用途 | メッセージ型 | QoS | Retain | Producer | Consumer |",
+      "    |---|---|---|---|---|---|---|",
+      "    | /docifycode/status/{process_history_id} | タスク進捗通知 | StatusMessage | 2 | true | GenerativeService, AICodeBot | FrontendBackend |",
+      "    | /docifycode/TaskRegistration/{process_history_id} | タスク登録依頼 | TaskRegistrationMessage | 2 | true | FrontendBackend | GenerativeService |",
+      "    | /docifycode/code/{process_history_id} | コード生成リクエスト | CodeGenerationMessage | 2 | - | 任意 | AICodeBot |",
+      "    | /docifycode/gitinfo/{project_id} | プロジェクトイベント | ProjectEventMessage | 2 | - | FrontendBackend | AICodeBot |",
+      "",
+      "- **メッセージスキーマ**",
+      "    - すべてPydanticモデルで定義。JSON形式でpublish。",
+      "    - StatusMessage: { process_history_id, project_id, status }",
+      "    - TaskRegistrationMessage: { process_history_id, project_id, generation_target, task_options, revision_number, user_name, token_password }",
+      "        - token_passwordはAES-256-GCMで暗号化（publish時）・復号（受信時）",
+      "    - CodeGenerationMessage: { process_history_id, project_id, generation_target, target_branch, target_language }",
+      "    - ProjectEventMessage: { type, project_id }",
+      "",
+      "- **QoS/Retain**",
+      "    - 既定QoSは2（Exactly-once）",
+      "    - StatusMessage, TaskRegistrationMessageはretain=trueでpublish",
+      "    - タスク完了/エラー時は空メッセージ+retain=trueで保持メッセージをクリア",
+      "",
+      "- **プロデューサ/コンシューマ**",
+      "    - 各コンポーネントが役割に応じてpublish/subscribe",
+      "    - トピックごとに明確な責務分担あり",
+      "",
+      "- **エラー処理**",
+      "    - MQTTクライアント層で自動再接続・再subscribe",
+      "    - JSONデコード・バリデーションエラー時はログ出力・DB保存",
+      "    - オフライン時はメッセージキューイングし、再接続時に一括再送",
+      "",
+      "#### 外部システムプロトコル",
+      "",
+      "- **SOAP/gRPC/独自プロトコル等の外部連携は未定義**",
+      "- **MQTT以外の外部システム連携仕様は存在しない**",
+      "- **セキュリティ**",
+      "    - MQTT通信は平文（TLS未設定）",
+      "    - 認証・認可・ACL未設定",
+      "    - メッセージ本文の暗号化はTaskRegistrationMessage.token_passwordのみ",
+      "",
+      "---",
+      "",
+      "### まとめ",
+      "",
+      "- 本システムのインターフェースは**全て認証・認可不要**であり、MQTTブローカー・WebSocketともに匿名アクセスが許可されている。",
+      "- メッセージキュー連携はMQTT（Eclipse Mosquitto）を中心に、明確なトピック・スキーマ・QoS/Retain運用で設計されている。",
+      "- ファイル連携や外部プロトコル連携は仕様上存在しない。",
+      "- セキュリティ要件は現状「信頼済み内部ネットワーク前提」であり、将来的な強化が必要とされている。"
+    ],
+    "endpoint_data": [
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c557b46fa933",
+        "interface_name": "FrontendWebSocketInterface",
+        "api_name": "StatusWebSocketAPI",
+        "uri": "/ws/status/{process_history_id}",
+        "method": "GET",
+        "req_param": "process_history_id（処理履歴ID）",
+        "response": "指定された処理履歴IDに紐づく進捗ステータスメッセージをWebSocket経由でリアルタイムに受信できる。メッセージ内容はStatusMessage（process_history_id, project_id, status）形式。",
+        "auth_required": "不要",
+        "summary": "MQTTで受信した進捗ステータスをWebSocketでクライアントに配信する。"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "タスク登録メッセージ送信API",
+        "uri": "/docifycode/task-registration",
+        "method": "POST",
+        "req_param": "process_history_id, project_id, generation_target, task_options, revision_number（任意）, user_name（任意）, token_password（任意・暗号化）",
+        "response": "MQTTブローカーへのタスク登録メッセージ送信結果（成功/失敗）",
+        "auth_required": "不要",
+        "summary": "指定されたタスク情報をMQTTブローカーの /docifycode/TaskRegistration/{process_history_id} トピックへpublish（QoS=2, retain=true）する。Git認証情報が含まれる場合は暗号化して送信する。"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "進捗ステータスメッセージ購読API",
+        "uri": "/docifycode/status/{process_history_id}",
+        "method": "SUBSCRIBE",
+        "req_param": "process_history_id（処理履歴ID）",
+        "response": "StatusMessage（process_history_id, project_id, status）形式の進捗ステータスメッセージを受信",
+        "auth_required": "不要",
+        "summary": "MQTTブローカーの/docifycode/status/{process_history_id}トピックを購読し、タスク進捗ステータスメッセージを非同期で受信する"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "タスク登録メッセージ購読API",
+        "uri": "/docifycode/task-registration/subscribe",
+        "method": "POST",
+        "req_param": "process_history_id（タスク履歴ID）",
+        "response": "MQTTブローカーから該当process_history_idのTaskRegistrationMessageを受信し、生成サービス側で検証・処理開始結果を返す",
+        "auth_required": "不要",
+        "summary": "MQTTブローカーの/docifycode/TaskRegistration/{process_history_id}トピックを購読し、タスク登録メッセージを受信する"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "PublishStatusMessageAPI",
+        "uri": "/docifycode/status/{process_history_id}",
+        "method": "POST",
+        "req_param": "process_history_id, project_id, status（pending | generating | completed | error | canceled）",
+        "response": "ステータスメッセージのMQTTブローカーへの送信結果（成功/失敗）",
+        "auth_required": "不要",
+        "summary": "生成処理やコード生成処理の進捗ステータス（StatusMessage）をMQTTブローカーの該当トピックにpublishする"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "コード生成リクエスト購読API",
+        "uri": "/docifycode/code/{process_history_id}",
+        "method": "SUBSCRIBE",
+        "req_param": "process_history_id",
+        "response": "CodeGenerationMessage（process_history_id, project_id, generation_target, target_branch, target_language）を受信",
+        "auth_required": "不要",
+        "summary": "MQTTブローカーの /docifycode/code/{process_history_id} トピックを購読し、コード生成リクエストメッセージを受信する"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "PublishStatusMessageAPI",
+        "uri": "/docifycode/status/{process_history_id}",
+        "method": "POST",
+        "req_param": "process_history_id, project_id, status（pending | generating | completed | error | canceled）",
+        "response": "MQTTブローカーへのStatusMessage送信結果（成功/失敗）",
+        "auth_required": "不要",
+        "summary": "生成処理やコード生成処理の進捗ステータスをMQTTブローカーへpublishする"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "コード生成リクエストメッセージ送信",
+        "uri": "/docifycode/code/{process_history_id}",
+        "method": "POST",
+        "req_param": "process_history_id, project_id, generation_target, target_branch, target_language",
+        "response": "コード生成リクエストの送信結果（成功/失敗）",
+        "auth_required": "不要",
+        "summary": "指定されたプロジェクト・履歴ID・ブランチ・言語でコード生成リクエストメッセージをMQTTブローカーへ送信する"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "PublishProjectEventMessageAPI",
+        "uri": "/docifycode/gitinfo/{project_id}",
+        "method": "POST",
+        "req_param": "project_id, type（new/edit/delete）",
+        "response": "プロジェクト設定イベントの送信結果（成功/失敗）",
+        "auth_required": "不要",
+        "summary": "プロジェクトの新規作成・編集・削除イベントをMQTTブローカーへ送信し、AICodeBot等の連携コンポーネントに通知する"
+      },
+      {
+        "interface_id": "01a08ebfdf2170faa2e3c5582e71dfd8",
+        "interface_name": "DocifyCodeMQTTInterface",
+        "api_name": "SubscribeProjectEventMessageAPI",
+        "uri": "/docifycode/gitinfo/{project_id}",
+        "method": "SUBSCRIBE",
+        "req_param": "project_id（プロジェクトID）",
+        "response": "プロジェクト設定イベントメッセージ（type, project_id）を受信し、AICodeBot内部の設定キャッシュが更新または削除される",
+        "auth_required": "不要",
+        "summary": "MQTTブローカーの/docifycode/gitinfo/{project_id}トピックを購読し、プロジェクト新規作成・編集・削除イベントを受信する"
+      }
+    ]
+  },
+  "sequence_diagram_data": {
+    "scenarios": [
+      {
+        "name": "生成処理の進捗ステータスを送信する",
+        "description": "Generative ServiceまたはAICodeBotが処理の開始・進行・完了・異常終了・キャンセルに応じてStatusMessageを生成し、/docifycode/status/{process_history_id}へQoS 2・retain=trueでpublishするシナリオ。pending、generating、completed、error、canceledの各状態を利用して、依頼元へ非同期に進捗を通知する。",
+        "sub_scenarios": [
+          "1. 生成処理開始時、Generative ServiceまたはAICodeBotが進捗ステータス（pending）を作成する。",
+          "2. StatusMessage（status=pending）をMQTTブローカーの /docifycode/status/{process_history_id} トピックへQoS2・retain=trueでpublishする。",
+          "3. 生成処理の進行中、進捗に応じてStatusMessage（status=generating等）を作成し、同トピックへpublishする。",
+          "4. 生成処理が完了した場合、StatusMessage（status=completed）を作成し、同トピックへpublishする。",
+          "5. 生成処理が異常終了した場合、StatusMessage（status=error）を作成し、同トピックへpublishする。",
+          "6. 生成処理がキャンセルされた場合、StatusMessage（status=canceled）を作成し、同トピックへpublishする。",
+          "7. 各StatusMessageはMQTTブローカーで該当トピックに保持（retained message）される。"
+        ]
+      },
+      {
+        "name": "永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+        "description": "Frontend Backendがclean_session=FalseでMQTTへ接続し、切断中もブローカー側にセッションと未配信メッセージを保持させ、再接続後にstatusメッセージを受信してDB更新とWebSocket配信を継続するシナリオ。Frontend特有の永続セッション運用により進捗通知の欠落を防止する。",
+        "sub_scenarios": [
+          "Frontend BackendがMQTTブローカーへclean_session=Falseで接続要求を送信する",
+          "MQTTブローカーが永続セッションを確立し、既存セッションがあれば未配信メッセージを保持する",
+          "Frontend Backendが進捗ステータス用トピック（/docifycode/status/+）をsubscribeする",
+          "MQTTブローカーが進捗ステータスメッセージをキューに蓄積し、切断中も保持する",
+          "Frontend Backendが何らかの理由でMQTTブローカーから切断される（ネットワーク障害等）",
+          "MQTTブローカーはセッションと未配信メッセージを維持し続ける",
+          "Frontend Backendが自動再接続を試行し、再びclean_session=Falseで接続する",
+          "MQTTブローカーが再接続時に未配信の進捗ステータスメッセージをFrontend Backendへ送信する",
+          "Frontend Backendが受信した進捗ステータスメッセージをDBへ永続化する",
+          "Frontend BackendがWebSocket経由でクライアント（ブラウザ等）へ進捗ステータスを配信する"
+        ]
+      },
+      {
+        "name": "コード生成リクエストを受信して処理する",
+        "description": "AICodeBotがcodeトピックを購読してCodeGenerationMessageを受信し、generation_targetがcode_from_detailed_designであることを確認したうえで、初期ステータス通知、プロジェクト設定参照、Gitリポジトリ連携、コード生成実行、進捗および完了・異常ステータス通知までを行うシナリオ。コード生成系の主処理フローを表す。",
+        "sub_scenarios": [
+          "AICodeBotがMQTTブローカーの /docifycode/code/+ トピックを購読開始する",
+          "MQTTブローカーがCodeGenerationMessageをAICodeBotに配信する",
+          "AICodeBotが受信したメッセージをJSONデコードし、Pydanticスキーマでバリデーションする",
+          "generation_targetがcode_from_detailed_designであることを判定する",
+          "初期状態としてStatusMessage（status=pending）を生成し、/docifycode/status/{process_history_id} へpublishする（QoS=2, retain=True）",
+          "AICodeBotがプロジェクト設定キャッシュを参照し、対象プロジェクトの設定情報を取得する",
+          "Gitリポジトリへの接続情報を準備し、リポジトリへアクセス（クローン/フェッチ等）する",
+          "必要なソース資産を取得し、指定されたブランチ・言語に基づきコード生成処理を実行する",
+          "処理進行中は適宜StatusMessage（status=generating等）をpublishする",
+          "コード生成が正常に完了した場合、StatusMessage（status=completed）をpublishする",
+          "異常が発生した場合、StatusMessage（status=error）をpublishし、エラー内容をログ出力する"
+        ]
+      },
+      {
+        "name": "タスク登録受信後に登録メッセージの保持を解除する",
+        "description": "Generative ServiceがTaskRegistrationMessageの受理後、同一トピックへ空ペイロードをretain=trueでpublishし、ブローカー上の保持済みタスク登録メッセージを削除するシナリオ。後続の再購読時に古い登録要求が再配信されることを防ぎ、1件の登録要求を一度だけ処理対象にするための保持解除フローである。",
+        "sub_scenarios": [
+          "DocifyCodeGenerativeServiceがMQTTブローカーからTaskRegistrationMessageを受信する",
+          "DocifyCodeGenerativeServiceが受信したメッセージ内容をスキーマ・必須項目で検証する",
+          "検証が成功した場合、DocifyCodeGenerativeServiceが生成処理を開始する",
+          "DocifyCodeGenerativeServiceが該当トピック（/docifycode/TaskRegistration/{process_history_id}）に対し、空ペイロードのメッセージをretain=trueでMQTTブローカーへpublishする",
+          "Mosquittoブローカーが空ペイロード受信時、該当トピックの保持メッセージを削除する",
+          "以降、同トピックを再購読しても古いTaskRegistrationMessageは配信されない"
+        ]
+      },
+      {
+        "name": "MQTT接続監視・自動再接続・自動再購読を行う",
+        "description": "各コンポーネントがMQTT接続状態を継続監視し、切断検知時に指数バックオフや定期監視ループを用いて再接続を試み、接続回復後に切断前の購読トピックを自動再subscribeするシナリオ。Frontend Backend、Generative Service、AICodeBotそれぞれの再接続戦略を含む可用性確保の基本フローである。",
+        "sub_scenarios": [
+          "各コンポーネント（Frontend Backend、Generative Service、AICodeBot）がMQTTクライアントの接続状態を定期的に監視する。",
+          "MQTT接続が切断された場合、切断イベントを検知し、WARNログを出力する。",
+          "自動再接続フラグが有効な場合、指数バックオフまたは一定間隔でMQTTブローカーへの再接続を試みる。",
+          "再接続が成功した場合、接続成功コールバックを実行し、切断前に購読していたトピック一覧を取得する。",
+          "取得したトピックごとに再度subscribeを実行し、ワイルドカード購読も含めて購読状態を復旧する。",
+          "再購読が成功した場合、イベント受信状態を回復し、通常のメッセージ処理を再開する。",
+          "再接続や再購読に失敗した場合はエラーログを出力し、最大試行回数を超えた場合は管理者へ通知する。"
+        ]
+      },
+      {
+        "name": "タスク登録メッセージを送信する",
+        "description": "ユーザー操作を契機にFrontend BackendがTaskRegistrationMessageを生成し、必要に応じてGit認証情報を暗号化したうえで、/docifycode/TaskRegistration/{process_history_id}へQoS 2・retain=trueでpublishするシナリオ。新規生成処理の開始要求を非同期にGenerative Serviceへ引き渡すための起点となる。",
+        "sub_scenarios": [
+          "ユーザーがタスク登録画面で対象プロジェクト、生成対象、任意オプション、Git認証情報を入力する",
+          "ユーザーがタスク登録要求を送信（UI操作）する",
+          "Frontend Backendが入力内容を受け取り、タスク登録メッセージ生成処理を開始する",
+          "Git認証情報が入力されている場合、暗号化処理を実行し、暗号化済みデータを取得する",
+          "暗号化済みGit認証情報を含めて、process_history_id, project_id, generation_target, task_options, revision_number, user_name, token_password（暗号化済み）を含むTaskRegistrationMessageを作成する",
+          "TaskRegistrationMessageをMQTTブローカーの /docifycode/TaskRegistration/{process_history_id} トピックへQoS=2, retain=trueでpublishする",
+          "Mosquittoブローカーがタスク登録メッセージを受信し、後続のGenerative Serviceへ配信する"
+        ]
+      },
+      {
+        "name": "プロジェクト設定イベントを受信して設定キャッシュを更新または削除する",
+        "description": "AICodeBotがgitinfoトピックを受信し、イベント種別に応じて対象プロジェクトの設定キャッシュを再構築または削除するシナリオ。new/editでは最新設定を取得して内部キャッシュへ反映し、deleteでは不要な設定を除去することで、後続処理の前提情報を整合させる。",
+        "sub_scenarios": [
+          "MQTTブローカーが/docifycode/gitinfo/{project_id}トピックでProjectEventMessageをpublishする。",
+          "AICodeBotがMQTTブローカーからProjectEventMessageを受信する。",
+          "AICodeBotが受信したメッセージをJSONデコードし、Pydanticスキーマでバリデーションする。",
+          "イベントタイプがnewまたはeditの場合、対象プロジェクトIDを抽出する。",
+          "AICodeBotが対象プロジェクトの最新設定情報を取得または再構築する。",
+          "AICodeBotが内部キャッシュに最新の設定情報を反映する。",
+          "イベントタイプがdeleteの場合、対象プロジェクトIDを抽出する。",
+          "AICodeBotが設定キャッシュに該当プロジェクトが存在するか確認する。",
+          "該当プロジェクトの設定キャッシュが存在する場合、AICodeBotがキャッシュを削除する。",
+          "イベントタイプが不正な場合、AICodeBotがエラーとしてログ出力し処理を終了する。"
+        ]
+      },
+      {
+        "name": "完了した処理に対して次工程のタスクを自動登録する",
+        "description": "Frontend Backendが完了済みステータスを受信した後、generation_targetが生成連鎖対象である場合に次工程のgeneration_targetと新しいprocess_history_idを決定し、次工程用TaskRegistrationMessageを自動生成してMQTTへpublishするシナリオ。複数段階の生成処理を疎結合に連鎖実行するための自動オーケストレーションである。",
+        "sub_scenarios": [
+          "DocifyCodeFrontendBackendがMQTTブローカーから進捗ステータスメッセージ（status=completedまたはerror）を受信する。",
+          "受信したステータスのgeneration_targetが生成連鎖対象かどうかを判定する。",
+          "生成連鎖対象であれば、次工程のgeneration_targetを決定する。",
+          "次工程用の新しいprocess_history_idを生成する。",
+          "次工程のTaskRegistrationMessageを作成する（必要なパラメータをセット）。",
+          "TaskRegistrationMessageをMQTTブローカーの /docifycode/TaskRegistration/{process_history_id} トピックへpublish（QoS=2, retain=true）する。",
+          "MQTTブローカーがメッセージを受信し、保持する。",
+          "DocifyCodeGenerativeServiceが該当トピックをsubscribeし、次工程の生成処理を開始する。"
+        ]
+      },
+      {
+        "name": "空ペイロードの保持解除メッセージを無視する",
+        "description": "購読側コンポーネントが空ペイロードのMQTTメッセージを受信した際、それを保持解除目的のメッセージと判定して通常の業務コールバックを実行せず即時returnするシナリオ。retain削除用メッセージが誤って業務処理対象にならないようにするための共通ガード処理である。",
+        "sub_scenarios": [
+          "MQTTブローカーが空ペイロードのメッセージをpublishする（retain削除目的）",
+          "購読側コンポーネントがMQTTメッセージを受信する",
+          "受信メッセージのペイロードが空かどうかを判定する",
+          "空ペイロードの場合、保持解除目的のメッセージとみなす",
+          "通常の業務コールバック（処理）を実行せず、即時returnする",
+          "何も処理せずシナリオ終了"
+        ]
+      },
+      {
+        "name": "プロジェクト設定イベントを送信する",
+        "description": "Frontend Backendがユーザーのプロジェクト新規作成・編集・削除操作を受けてProjectEventMessageを生成し、/docifycode/gitinfo/{project_id}へpublishするシナリオ。AICodeBotへ設定変更を通知し、後続のGit連携やコード生成で最新設定を利用できるようにする。",
+        "sub_scenarios": [
+          "ユーザーがプロジェクトの新規作成・編集・削除操作を実施する",
+          "DocifyCodeFrontendBackendがユーザー操作を受けてProjectEventMessageを生成する",
+          "イベントタイプ（new/edit/delete）とプロジェクトIDをメッセージに含める",
+          "PydanticスキーマでProjectEventMessageのバリデーションを行う",
+          "MQTTブローカー（Mosquitto）の/docifycode/gitinfo/{project_id}トピックへQoS=2, retain=Falseでpublishする",
+          "Mosquittoブローカーが受信したメッセージをAICodeBotへ配信する",
+          "AICodeBotがProjectEventMessageを受信し、typeに応じてプロジェクト設定キャッシュの再構築または削除を行う"
+        ]
+      },
+      {
+        "name": "タスク進捗ステータスを受信してDB更新とWebSocket配信を行う",
+        "description": "Frontend Backendがstatusトピックを購読してStatusMessageを受信し、メッセージ検証後に対象の処理履歴またはプロジェクト状態をDBへ反映し、同時に該当process_history_idを監視しているWebSocketクライアントへリアルタイム配信するシナリオ。MQTT受信結果をユーザー向け状態可視化へ橋渡しする中心フローである。",
+        "sub_scenarios": [
+          "MQTTクライアントが/docifycode/status/+ トピックをQoS=2で購読開始する",
+          "MQTTブローカー（Mosquitto）が進捗ステータスメッセージ（StatusMessage）をpublishし、Frontend Backendへ配信する",
+          "Frontend BackendのMQTT購読処理がメッセージを受信する",
+          "受信したメッセージのペイロードが空かどうかを判定し、空の場合は保持解除用として無視する",
+          "ペイロードが空でなければ、JSONデコードとPydanticスキーマバリデーションを実施する",
+          "バリデーションに成功した場合、process_history_id・project_id・statusを抽出する",
+          "DBから該当する処理履歴またはプロジェクトレコードを検索する",
+          "該当レコードが存在すれば、statusを受信値で更新し、DBへ保存する（失敗時はエラーログ）",
+          "接続中のWebSocketクライアント一覧から、該当process_history_idを監視しているクライアントを抽出する",
+          "該当WebSocketクライアントへStatusMessageをリアルタイム配信する（送信失敗時はエラーログ）",
+          "全処理が正常に完了した場合は処理終了。不正メッセージや例外発生時はエラーログ・状態error化を行う"
+        ]
+      },
+      {
+        "name": "完了またはエラー時にステータス保持メッセージを削除する",
+        "description": "Frontend BackendがcompletedまたはerrorのStatusMessageを検知した際に、該当statusトピックへ空ペイロードをretain=trueでpublishして保持メッセージを削除するシナリオ。最終状態の残留による誤配信を防ぎ、タスク終了後のトピック状態をクリーンに保つ。",
+        "sub_scenarios": [
+          "DocifyCodeFrontendBackendがMQTTブローカーからStatusMessageを受信する",
+          "受信したStatusMessageのstatusフィールドが\"completed\"または\"error\"であるか判定する",
+          "statusが\"completed\"または\"error\"の場合、DocifyCodeFrontendBackendは該当のstatusトピック（/docifycode/status/{process_history_id}）に空ペイロードのメッセージをretain=trueでpublishする",
+          "MQTTブローカー（Mosquitto）は空ペイロードのretainメッセージを受信し、該当トピックの保持メッセージを削除する",
+          "以降、同トピックをsubscribeしたクライアントは保持メッセージを受信しなくなる"
+        ]
+      },
+      {
+        "name": "オフライン中に蓄積したメッセージを再送する",
+        "description": "Generative ServiceがMQTT切断中に送信できなかったStatusMessageや保持解除操作を内部キューへ蓄積し、再接続成功後に順次flushして再送するシナリオ。オフライン時の進捗通知欠落を補完し、非同期処理の整合性を維持する。",
+        "sub_scenarios": [
+          "1. Generative ServiceがMQTTブローカーへの接続状態を定期的に監視する。",
+          "2. MQTT接続が切断された場合、進捗ステータスメッセージや保持解除操作（retentionクリア）を送信しようとすると、送信できなかったメッセージを内部キューに蓄積する。",
+          "3. MQTT接続が復旧するまで、内部キューにメッセージを追加し続ける。",
+          "4. MQTT接続が再確立されたことを検知したら、内部キューに蓄積された全メッセージを順次MQTTブローカーへ再送する。",
+          "5. 各メッセージの送信結果を確認し、送信に失敗した場合はエラーログを出力する。",
+          "6. 送信成功したメッセージをキューから削除し、全てのメッセージ送信が完了したらキューをクリアする。",
+          "7. 以降はMQTT接続が維持されている限り、通常通りメッセージを即時送信する。"
+        ]
+      },
+      {
+        "name": "MQTTブローカーへ接続して購読を開始する",
+        "description": "各コンポーネントが環境変数からMQTT接続設定を読み込み、client_id・keepalive・QoS・clean_session設定を用いてMosquittoへ接続し、担当トピックの購読を開始するシナリオ。Frontend Backendは永続セッションでstatusトピックを購読し、Generative ServiceはTaskRegistrationを、AICodeBotはcodeおよびgitinfoを購読する。ワイルドカード購読や購読コールバック登録もこの流れに含まれる。",
+        "sub_scenarios": [
+          "各コンポーネントが起動し、環境変数からMQTT接続パラメータ（ホスト、ポート、client_id、keepalive、QoS、clean_session）を読み込む",
+          "MQTTクライアントインスタンスを生成し、設定値を適用する",
+          "MQTTブローカー（Mosquitto）へ接続を試行する",
+          "接続成功時、ログを出力し、メッセージ送受信の準備を完了する",
+          "DocifyCodeFrontendBackendはclean_session=Falseで永続セッションを確立し、/docifycode/status/+ トピックをQoS2でワイルドカード購読する",
+          "DocifyCodeGenerativeServiceはclean_session=Trueで /docifycode/TaskRegistration/+ トピックをQoS2でワイルドカード購読する",
+          "AICodeBotはclean_session=Trueで /docifycode/code/+ および /docifycode/gitinfo/+ トピックをQoS2でワイルドカード購読する",
+          "各購読時、MQTTクライアントはコールバック関数を登録し、該当トピックのメッセージ受信時に処理を実行できるようにする",
+          "購読成功時、ログを出力し、購読状態を維持する"
+        ]
+      },
+      {
+        "name": "コード生成リクエストを送信する",
+        "description": "ユーザーまたは任意の発行元がCodeGenerationMessageを作成し、/docifycode/code/{process_history_id}へpublishしてAICodeBotへコード生成要求を通知するシナリオ。対象プロジェクト、処理履歴、対象ブランチ、対象言語を指定し、詳細設計からコード生成を開始する入口となる。",
+        "sub_scenarios": [
+          "ユーザーがフロントエンドバックエンドにてコード生成を依頼する操作を実施する",
+          "DocifyCodeFrontendBackendがユーザー操作を受けてCodeGenerationMessageを生成する",
+          "対象プロジェクトID、処理履歴ID、対象ブランチ、対象言語をメッセージに含める",
+          "Pydanticスキーマでメッセージ内容をバリデーションする",
+          "MQTTブローカー（Mosquitto）の /docifycode/code/{process_history_id} トピックへQoS=2, retain=Falseでpublishする",
+          "Mosquittoブローカーがメッセージを受信し、AICodeBotが該当トピックをsubscribeしているため配信する",
+          "AICodeBotがCodeGenerationMessageを受信し、generation_target=code_from_detailed_designの場合のみ処理を開始する"
+        ]
+      },
+      {
+        "name": "不正または解釈不能なメッセージをエラーとして処理する",
+        "description": "各受信コンポーネントがMQTTメッセージ受信時に空ペイロード判定、JSONデコード、Pydanticバリデーション、業務処理例外の各段階で異常を検知し、エラーログ出力、例外情報保存、必要に応じたDB記録や状態のerrorフォールバックを行うシナリオ。異常系の標準処理として全メッセージ系機能を支える。",
+        "sub_scenarios": [
+          "MQTTブローカーからメッセージを受信する",
+          "メッセージペイロードが空か判定する",
+          "空の場合は保持解除用メッセージとして無視し処理終了",
+          "空でない場合はメッセージをJSONとしてデコードする",
+          "JSONデコードに失敗した場合、エラーログを出力し、例外情報を保存、必要に応じてDBへ例外記録、該当処理の状態をerrorへ更新し処理終了",
+          "JSONデコードに成功した場合、Pydanticスキーマでバリデーションを行う",
+          "バリデーションに失敗した場合、エラーログを出力し、例外情報を保存、必要に応じてDBへ例外記録、該当処理の状態をerrorへ更新し処理終了",
+          "バリデーションに成功した場合、通常の業務処理を実行する",
+          "業務処理中に例外が発生した場合、エラーログを出力し、例外情報を保存、必要に応じてDBへ例外記録、該当処理の状態をerrorへ更新し処理終了",
+          "業務処理が正常に終了した場合、処理を完了する"
+        ]
+      },
+      {
+        "name": "タスク登録メッセージを受信して生成処理を開始する",
+        "description": "Generative ServiceがTaskRegistrationトピックを受信し、JSONデコード・Pydanticバリデーション・generation_target判定・必要な認証情報の復号を行ったうえで、対象の生成処理を開始するシナリオ。処理開始後は進捗通知のpublishへ接続され、非同期ワーカーとして実処理を進める。",
+        "sub_scenarios": [
+          "DocifyCodeGenerativeServiceがMQTTブローカーからTaskRegistrationトピックのメッセージを受信する",
+          "受信したメッセージペイロードが空でないかを判定する（空の場合は無視）",
+          "メッセージをJSONとしてデコードする",
+          "デコード結果をPydanticスキーマでバリデーションする",
+          "バリデーションに失敗した場合はエラーログ出力・状態をerrorで通知し処理終了",
+          "バリデーションに成功した場合、generation_targetの値に応じて処理分岐を決定する",
+          "task_optionsやrevision_number、user_name等のオプション値を取得する",
+          "token_passwordフィールドが存在する場合は共通暗号化モジュールでAES-256-GCM復号を行う",
+          "復号に失敗した場合はエラーログ出力・認証情報なしで処理継続またはエラー通知",
+          "復号に成功した場合は平文のGit認証情報を生成処理用に利用可能とする",
+          "バックグラウンドで対象の生成処理を開始する",
+          "進捗ステータス（pending）をStatusトピックにpublishする",
+          "以降、生成処理の進捗に応じてStatusメッセージをpublishし続ける"
+        ]
+      }
+    ],
+    "participants": [
+      {
+        "name": "生成処理の進捗ステータスを送信する",
+        "participants": [
+          "DocifyCodeGenerativeService",
+          "AICodeBot",
+          "Mosquittoブローカー"
+        ]
+      },
+      {
+        "name": "永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+        "participants": [
+          "Frontend Backend",
+          "MQTTブローカー"
+        ]
+      },
+      {
+        "name": "コード生成リクエストを受信して処理する",
+        "participants": [
+          "AICodeBot",
+          "MQTTブローカー",
+          "Gitリポジトリ"
+        ]
+      },
+      {
+        "name": "タスク登録受信後に登録メッセージの保持を解除する",
+        "participants": [
+          "DocifyCodeGenerativeService",
+          "Mosquittoブローカー"
+        ]
+      },
+      {
+        "name": "MQTT接続監視・自動再接続・自動再購読を行う",
+        "participants": [
+          "Frontend Backend",
+          "Generative Service",
+          "AICodeBot",
+          "MQTT Broker"
+        ]
+      },
+      {
+        "name": "タスク登録メッセージを送信する",
+        "participants": [
+          "ユーザー",
+          "Frontend Backend",
+          "Mosquittoブローカー"
+        ]
+      },
+      {
+        "name": "プロジェクト設定イベントを受信して設定キャッシュを更新または削除する",
+        "participants": [
+          "MQTTブローカー",
+          "AICodeBot"
+        ]
+      },
+      {
+        "name": "完了した処理に対して次工程のタスクを自動登録する",
+        "participants": [
+          "DocifyCodeFrontendBackend",
+          "MQTTブローカー",
+          "DocifyCodeGenerativeService"
+        ]
+      },
+      {
+        "name": "空ペイロードの保持解除メッセージを無視する",
+        "participants": [
+          "MQTTブローカー",
+          "購読側コンポーネント"
+        ]
+      },
+      {
+        "name": "プロジェクト設定イベントを送信する",
+        "participants": [
+          "ユーザー",
+          "DocifyCodeFrontendBackend",
+          "Mosquittoブローカー",
+          "AICodeBot"
+        ]
+      },
+      {
+        "name": "タスク進捗ステータスを受信してDB更新とWebSocket配信を行う",
+        "participants": [
+          "DocifyCodeFrontendBackend",
+          "Mosquittoブローカー",
+          "DB（永続化層）",
+          "WebSocketクライアント"
+        ]
+      },
+      {
+        "name": "完了またはエラー時にステータス保持メッセージを削除する",
+        "participants": [
+          "DocifyCodeFrontendBackend",
+          "MQTTブローカー（Mosquitto）"
+        ]
+      },
+      {
+        "name": "オフライン中に蓄積したメッセージを再送する",
+        "participants": [
+          "DocifyCodeGenerativeService",
+          "MQTTブローカー（Mosquitto）"
+        ]
+      },
+      {
+        "name": "MQTTブローカーへ接続して購読を開始する",
+        "participants": [
+          "DocifyCodeFrontendBackend",
+          "DocifyCodeGenerativeService",
+          "AICodeBot",
+          "MosquittoBroker"
+        ]
+      },
+      {
+        "name": "コード生成リクエストを送信する",
+        "participants": [
+          "ユーザー",
+          "DocifyCodeFrontendBackend",
+          "Mosquittoブローカー",
+          "AICodeBot"
+        ]
+      },
+      {
+        "name": "不正または解釈不能なメッセージをエラーとして処理する",
+        "participants": [
+          "MQTTブローカー",
+          "受信コンポーネント（FrontendBackend, GenerativeService, AICodeBot いずれか）",
+          "DB（例外記録用、必要時）"
+        ]
+      },
+      {
+        "name": "タスク登録メッセージを受信して生成処理を開始する",
+        "participants": [
+          "DocifyCodeGenerativeService",
+          "Mosquittoブローカー"
+        ]
+      }
+    ],
+    "sequence_diagrams": [
+      {
+        "scenario_name": "生成処理の進捗ステータスを送信する",
+        "sequence_diagram": [
+          "@startuml",
+          "title 生成処理の進捗ステータスを送信する - StatusMessageのpublishフロー",
+          "",
+          "participant \"DocifyCodeGenerativeService\" as GS",
+          "participant \"AICodeBot\" as AB",
+          "participant \"Mosquittoブローカー\" as MQTT",
+          "",
+          "== 1. 生成処理開始時、Generative ServiceまたはAICodeBotが進捗ステータス（pending）を作成する。 ==",
+          "",
+          "alt Generative Serviceによる開始",
+          "    activate GS",
+          "    GS -> GS: StatusMessage(status=pending)を生成",
+          "    deactivate GS",
+          "else AICodeBotによる開始",
+          "    activate AB",
+          "    AB -> AB: StatusMessage(status=pending)を生成",
+          "    deactivate AB",
+          "end",
+          "",
+          "== 2. StatusMessage（status=pending）をMQTTブローカーの /docifycode/status/{process_history_id} トピックへQoS2・retain=trueでpublishする。 ==",
+          "",
+          "alt Generative Serviceからpublish",
+          "    activate GS",
+          "    GS -> MQTT: publish StatusMessage(status=pending)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate GS",
+          "else AICodeBotからpublish",
+          "    activate AB",
+          "    AB -> MQTT: publish StatusMessage(status=pending)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate AB",
+          "end",
+          "",
+          "== 3. 生成処理の進行中、進捗に応じてStatusMessage（status=generating等）を作成し、同トピックへpublishする。 ==",
+          "",
+          "loop 進捗更新（generating等）",
+          "    alt Generative Serviceによる進捗",
+          "        activate GS",
+          "        GS -> GS: StatusMessage(status=generating)等を生成",
+          "        GS -> MQTT: publish StatusMessage(status=generating等)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "        deactivate GS",
+          "    else AICodeBotによる進捗",
+          "        activate AB",
+          "        AB -> AB: StatusMessage(status=generating)等を生成",
+          "        AB -> MQTT: publish StatusMessage(status=generating等)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "        deactivate AB",
+          "    end",
+          "end",
+          "",
+          "== 4. 生成処理が完了した場合、StatusMessage（status=completed）を作成し、同トピックへpublishする。 ==",
+          "",
+          "alt Generative Serviceで完了",
+          "    activate GS",
+          "    GS -> GS: StatusMessage(status=completed)を生成",
+          "    GS -> MQTT: publish StatusMessage(status=completed)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate GS",
+          "else AICodeBotで完了",
+          "    activate AB",
+          "    AB -> AB: StatusMessage(status=completed)を生成",
+          "    AB -> MQTT: publish StatusMessage(status=completed)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate AB",
+          "end",
+          "",
+          "== 5. 生成処理が異常終了した場合、StatusMessage（status=error）を作成し、同トピックへpublishする。 ==",
+          "",
+          "alt Generative Serviceで異常終了",
+          "    activate GS",
+          "    GS -> GS: StatusMessage(status=error)を生成",
+          "    GS -> MQTT: publish StatusMessage(status=error)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate GS",
+          "else AICodeBotで異常終了",
+          "    activate AB",
+          "    AB -> AB: StatusMessage(status=error)を生成",
+          "    AB -> MQTT: publish StatusMessage(status=error)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate AB",
+          "end",
+          "",
+          "== 6. 生成処理がキャンセルされた場合、StatusMessage（status=canceled）を作成し、同トピックへpublishする。 ==",
+          "",
+          "alt Generative Serviceでキャンセル",
+          "    activate GS",
+          "    GS -> GS: StatusMessage(status=canceled)を生成",
+          "    GS -> MQTT: publish StatusMessage(status=canceled)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate GS",
+          "else AICodeBotでキャンセル",
+          "    activate AB",
+          "    AB -> AB: StatusMessage(status=canceled)を生成",
+          "    AB -> MQTT: publish StatusMessage(status=canceled)\\n(topic=/docifycode/status/{process_history_id}, QoS=2, retain=true)",
+          "    deactivate AB",
+          "end",
+          "",
+          "== 7. 各StatusMessageはMQTTブローカーで該当トピックに保持（retained message）される。 ==",
+          "",
+          "activate MQTT",
+          "MQTT -> MQTT: StatusMessageを該当トピックにretained messageとして保持",
+          "deactivate MQTT",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+        "sequence_diagram": [
+          "@startuml",
+          "title 永続セッションによりオフライン中のステータス取りこぼしを防ぐ",
+          "",
+          "participant \"Frontend Backend\" as FE",
+          "participant \"MQTTブローカー\" as MQTT",
+          "",
+          "== Frontend BackendがMQTTブローカーへclean_session=Falseで接続要求を送信する ==",
+          "FE -> MQTT: MQTT connect (clean_session=False)",
+          "activate FE",
+          "",
+          "== MQTTブローカーが永続セッションを確立し、既存セッションがあれば未配信メッセージを保持する ==",
+          "alt 既存セッションが存在する",
+          "    MQTT -> MQTT: 切断中に蓄積された進捗ステータスメッセージを保持",
+          "else 新規セッション",
+          "    MQTT -> MQTT: 新規セッションを作成",
+          "end",
+          "",
+          "== Frontend Backendが進捗ステータス用トピック（/docifycode/status/+）をsubscribeする ==",
+          "FE -> MQTT: SUBSCRIBE /docifycode/status/+",
+          "deactivate FE",
+          "",
+          "== MQTTブローカーが進捗ステータスメッセージをキューに蓄積し、切断中も保持する ==",
+          "MQTT -> MQTT: 進捗ステータスメッセージをキューに蓄積（QoS2, retain=true）",
+          "",
+          "== Frontend Backendが何らかの理由でMQTTブローカーから切断される（ネットワーク障害等） ==",
+          "FE -x MQTT: ネットワーク障害等で切断",
+          "activate MQTT",
+          "",
+          "== MQTTブローカーはセッションと未配信メッセージを維持し続ける ==",
+          "MQTT -> MQTT: セッションと未配信メッセージを維持",
+          "",
+          "== Frontend Backendが自動再接続を試行し、再びclean_session=Falseで接続する ==",
+          "FE -> MQTT: MQTT再接続 (clean_session=False)",
+          "activate FE",
+          "",
+          "== MQTTブローカーが再接続時に未配信の進捗ステータスメッセージをFrontend Backendへ送信する ==",
+          "MQTT -> FE: 未配信の進捗ステータスメッセージを送信",
+          "deactivate MQTT",
+          "",
+          "== Frontend Backendが受信した進捗ステータスメッセージをDBへ永続化する ==",
+          "FE -> FE: 進捗ステータスメッセージをDBへ保存",
+          "",
+          "== Frontend BackendがWebSocket経由でクライアント（ブラウザ等）へ進捗ステータスを配信する ==",
+          "FE -> FE: WebSocket経由でクライアントへ配信",
+          "",
+          "deactivate FE",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "コード生成リクエストを受信して処理する",
+        "sequence_diagram": [
+          "@startuml",
+          "title コード生成リクエストを受信して処理する（AICodeBotによるCodeGenerationMessage主処理フロー）",
+          "",
+          "participant \"AICodeBot\" as AICodeBot",
+          "participant \"MQTTブローカー\" as MQTT",
+          "participant \"Gitリポジトリ\" as GitRepo",
+          "",
+          "== AICodeBotがMQTTブローカーの /docifycode/code/+ トピックを購読開始する ==",
+          "AICodeBot -> MQTT: SUBSCRIBE /docifycode/code/+",
+          "activate AICodeBot",
+          "",
+          "== MQTTブローカーがCodeGenerationMessageをAICodeBotに配信する ==",
+          "MQTT -> AICodeBot: CodeGenerationMessage（/docifycode/code/{process_history_id}）",
+          "activate AICodeBot",
+          "",
+          "== AICodeBotが受信したメッセージをJSONデコードし、Pydanticスキーマでバリデーションする ==",
+          "AICodeBot -> AICodeBot: JSONデコード & Pydanticバリデーション",
+          "",
+          "alt バリデーション成功",
+          "    == generation_targetがcode_from_detailed_designであることを判定する ==",
+          "    AICodeBot -> AICodeBot: generation_targetを判定",
+          "",
+          "    alt generation_target == code_from_detailed_design",
+          "        == 初期状態としてStatusMessage（status=pending）を生成し、/docifycode/status/{process_history_id} へpublishする（QoS=2, retain=True） ==",
+          "        AICodeBot -> MQTT: PUBLISH StatusMessage(status=pending)\\n/topic: /docifycode/status/{process_history_id}\\nQoS=2, retain=True",
+          "",
+          "        == AICodeBotがプロジェクト設定キャッシュを参照し、対象プロジェクトの設定情報を取得する ==",
+          "        AICodeBot -> AICodeBot: プロジェクト設定キャッシュ参照",
+          "",
+          "        alt プロジェクト設定あり",
+          "            == Gitリポジトリへの接続情報を準備し、リポジトリへアクセス（クローン/フェッチ等）する ==",
+          "            AICodeBot -> GitRepo: Gitリポジトリへアクセス（クローン/フェッチ等）",
+          "            activate GitRepo",
+          "            GitRepo --> AICodeBot: ソース資産取得",
+          "            deactivate GitRepo",
+          "",
+          "            == 必要なソース資産を取得し、指定されたブランチ・言語に基づきコード生成処理を実行する ==",
+          "            AICodeBot -> AICodeBot: コード生成処理実行",
+          "",
+          "            == 処理進行中は適宜StatusMessage（status=generating等）をpublishする ==",
+          "            loop 進捗通知",
+          "                AICodeBot -> MQTT: PUBLISH StatusMessage(status=generating)\\n/topic: /docifycode/status/{process_history_id}",
+          "            end",
+          "",
+          "            alt コード生成が正常に完了",
+          "                == コード生成が正常に完了した場合、StatusMessage（status=completed）をpublishする ==",
+          "                AICodeBot -> MQTT: PUBLISH StatusMessage(status=completed)\\n/topic: /docifycode/status/{process_history_id}",
+          "            else 異常が発生",
+          "                == 異常が発生した場合、StatusMessage（status=error）をpublishし、エラー内容をログ出力する ==",
+          "                AICodeBot -> MQTT: PUBLISH StatusMessage(status=error)\\n/topic: /docifycode/status/{process_history_id}",
+          "                AICodeBot -> AICodeBot: エラー内容をログ出力",
+          "            end",
+          "",
+          "        else プロジェクト設定なし",
+          "            == プロジェクト設定が存在しない場合、StatusMessage（status=error）をpublishし、エラー内容をログ出力する ==",
+          "            AICodeBot -> MQTT: PUBLISH StatusMessage(status=error)\\n/topic: /docifycode/status/{process_history_id}",
+          "            AICodeBot -> AICodeBot: エラー内容をログ出力",
+          "        end",
+          "",
+          "    else generation_targetがcode_from_detailed_design以外",
+          "        == 対応しないgeneration_targetの場合はリクエストを無視する ==",
+          "        AICodeBot -> AICodeBot: リクエスト無視",
+          "    end",
+          "",
+          "else バリデーション失敗",
+          "    == バリデーションエラー時はStatusMessage（status=error）をpublishし、エラー内容をログ出力する ==",
+          "    AICodeBot -> MQTT: PUBLISH StatusMessage(status=error)\\n/topic: /docifycode/status/{process_history_id}",
+          "    AICodeBot -> AICodeBot: エラー内容をログ出力",
+          "end",
+          "",
+          "deactivate AICodeBot",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "タスク登録受信後に登録メッセージの保持を解除する",
+        "sequence_diagram": [
+          "@startuml",
+          "title タスク登録受信後に登録メッセージの保持を解除する",
+          "",
+          "participant DocifyCodeGenerativeService",
+          "participant Mosquittoブローカー",
+          "",
+          "== DocifyCodeGenerativeServiceがMQTTブローカーからTaskRegistrationMessageを受信する ==",
+          "Mosquittoブローカー -> DocifyCodeGenerativeService: TaskRegistrationMessage (retain=true, QoS=2)",
+          "activate DocifyCodeGenerativeService",
+          "",
+          "== DocifyCodeGenerativeServiceが受信したメッセージ内容をスキーマ・必須項目で検証する ==",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: メッセージ検証（スキーマ・必須項目チェック）",
+          "",
+          "alt 検証成功",
+          "    == 検証が成功した場合、DocifyCodeGenerativeServiceが生成処理を開始する ==",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 生成処理開始",
+          "",
+          "    == DocifyCodeGenerativeServiceが該当トピック（/docifycode/TaskRegistration/{process_history_id}）に対し、空ペイロードのメッセージをretain=trueでMQTTブローカーへpublishする ==",
+          "    DocifyCodeGenerativeService -> Mosquittoブローカー: publish 空ペイロード (retain=true, /docifycode/TaskRegistration/{process_history_id})",
+          "",
+          "    == Mosquittoブローカーが空ペイロード受信時、該当トピックの保持メッセージを削除する ==",
+          "    Mosquittoブローカー -> Mosquittoブローカー: 保持メッセージ削除（該当トピック）",
+          "",
+          "    == 以降、同トピックを再購読しても古いTaskRegistrationMessageは配信されない ==",
+          "    Mosquittoブローカー -> DocifyCodeGenerativeService: (再購読時) 空メッセージのみ配信",
+          "else 検証失敗",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: エラー処理・ログ出力",
+          "end",
+          "",
+          "deactivate DocifyCodeGenerativeService",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "MQTT接続監視・自動再接続・自動再購読を行う",
+        "sequence_diagram": [
+          "@startuml",
+          "title MQTT接続監視・自動再接続・自動再購読を行う",
+          "",
+          "participant \"Frontend Backend\" as FE",
+          "participant \"Generative Service\" as GS",
+          "participant \"AICodeBot\" as AB",
+          "participant \"MQTT Broker\" as MQTT",
+          "",
+          "== 各コンポーネント（Frontend Backend、Generative Service、AICodeBot）がMQTTクライアントの接続状態を定期的に監視する。 ==",
+          "activate FE",
+          "FE -> FE : 定期的にMQTT接続状態を監視",
+          "deactivate FE",
+          "",
+          "activate GS",
+          "GS -> GS : 定期的にMQTT接続状態を監視",
+          "deactivate GS",
+          "",
+          "activate AB",
+          "AB -> AB : 定期的にMQTT接続状態を監視",
+          "deactivate AB",
+          "",
+          "== MQTT接続が切断された場合、切断イベントを検知し、WARNログを出力する。 ==",
+          "alt Frontend Backendで切断検知",
+          "    FE -> FE : 切断イベント検知",
+          "    FE -> FE : WARNログ出力",
+          "end",
+          "alt Generative Serviceで切断検知",
+          "    GS -> GS : 切断イベント検知",
+          "    GS -> GS : WARNログ出力",
+          "end",
+          "alt AICodeBotで切断検知",
+          "    AB -> AB : 切断イベント検知",
+          "    AB -> AB : WARNログ出力",
+          "end",
+          "",
+          "== 自動再接続フラグが有効な場合、指数バックオフまたは一定間隔でMQTTブローカーへの再接続を試みる。 ==",
+          "alt Frontend Backend: 自動再接続有効",
+          "    loop 再接続試行（最大回数まで/成功まで）",
+          "        FE -> MQTT : 再接続試行",
+          "        alt 接続失敗",
+          "            FE -> FE : バックオフ待機",
+          "        else 接続成功",
+          "            FE -> FE : 接続成功コールバック",
+          "            break",
+          "        end",
+          "    end",
+          "end",
+          "alt Generative Service: 自動再接続有効",
+          "    loop 再接続試行（最大回数まで/成功まで）",
+          "        GS -> MQTT : 再接続試行",
+          "        alt 接続失敗",
+          "            GS -> GS : バックオフ待機",
+          "        else 接続成功",
+          "            GS -> GS : 接続成功コールバック",
+          "            break",
+          "        end",
+          "    end",
+          "end",
+          "alt AICodeBot: 自動再接続有効",
+          "    loop 再接続試行（最大回数まで/成功まで）",
+          "        AB -> MQTT : 再接続試行",
+          "        alt 接続失敗",
+          "            AB -> AB : バックオフ待機",
+          "        else 接続成功",
+          "            AB -> AB : 接続成功コールバック",
+          "            break",
+          "        end",
+          "    end",
+          "end",
+          "",
+          "== 再接続が成功した場合、接続成功コールバックを実行し、切断前に購読していたトピック一覧を取得する。 ==",
+          "alt Frontend Backend",
+          "    FE -> FE : 切断前の購読トピック一覧を取得",
+          "end",
+          "alt Generative Service",
+          "    GS -> GS : 切断前の購読トピック一覧を取得",
+          "end",
+          "alt AICodeBot",
+          "    AB -> AB : 切断前の購読トピック一覧を取得",
+          "end",
+          "",
+          "== 取得したトピックごとに再度subscribeを実行し、ワイルドカード購読も含めて購読状態を復旧する。 ==",
+          "alt Frontend Backend",
+          "    loop トピックごと",
+          "        FE -> MQTT : subscribe (通常/ワイルドカード含む)",
+          "    end",
+          "end",
+          "alt Generative Service",
+          "    loop トピックごと",
+          "        GS -> MQTT : subscribe (通常/ワイルドカード含む)",
+          "    end",
+          "end",
+          "alt AICodeBot",
+          "    loop トピックごと",
+          "        AB -> MQTT : subscribe (通常/ワイルドカード含む)",
+          "    end",
+          "end",
+          "",
+          "== 再購読が成功した場合、イベント受信状態を回復し、通常のメッセージ処理を再開する。 ==",
+          "alt Frontend Backend",
+          "    FE -> FE : イベント受信状態回復・通常処理再開",
+          "end",
+          "alt Generative Service",
+          "    GS -> GS : イベント受信状態回復・通常処理再開",
+          "end",
+          "alt AICodeBot",
+          "    AB -> AB : イベント受信状態回復・通常処理再開",
+          "end",
+          "",
+          "== 再接続や再購読に失敗した場合はエラーログを出力し、最大試行回数を超えた場合は管理者へ通知する。 ==",
+          "alt 再接続/再購読失敗",
+          "    alt Frontend Backend",
+          "        FE -> FE : エラーログ出力",
+          "        alt 最大試行回数超過",
+          "            FE -> FE : 管理者へ通知",
+          "        end",
+          "    end",
+          "    alt Generative Service",
+          "        GS -> GS : エラーログ出力",
+          "        alt 最大試行回数超過",
+          "            GS -> GS : 管理者へ通知",
+          "        end",
+          "    end",
+          "    alt AICodeBot",
+          "        AB -> AB : エラーログ出力",
+          "        alt 最大試行回数超過",
+          "            AB -> AB : 管理者へ通知",
+          "        end",
+          "    end",
+          "end",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "タスク登録メッセージを送信する",
+        "sequence_diagram": [
+          "@startuml",
+          "title タスク登録メッセージを送信する: ユーザー操作からMQTT経由でTaskRegistrationMessageをpublish",
+          "",
+          "actor ユーザー",
+          "participant \"Frontend Backend\" as FE",
+          "participant \"Mosquittoブローカー\" as MQTT",
+          "",
+          "== ユーザーがタスク登録画面で対象プロジェクト、生成対象、任意オプション、Git認証情報を入力する ==",
+          "ユーザー -> FE: タスク登録画面で情報入力",
+          "",
+          "== ユーザーがタスク登録要求を送信（UI操作）する ==",
+          "ユーザー -> FE: タスク登録要求送信",
+          "",
+          "== Frontend Backendが入力内容を受け取り、タスク登録メッセージ生成処理を開始する ==",
+          "activate FE",
+          "FE -> FE: 入力内容を検証・整形",
+          "",
+          "== Git認証情報が入力されている場合、暗号化処理を実行し、暗号化済みデータを取得する ==",
+          "alt Git認証情報が入力されている",
+          "    FE -> FE: ENCRYPTION_KEY取得",
+          "    FE -> FE: AES-256-GCMでGit認証情報を暗号化",
+          "    FE -> FE: ノンス+暗号文をbase64化し暗号化済みデータ生成",
+          "else Git認証情報が未入力",
+          "    FE -> FE: token_passwordフィールドは空欄",
+          "end",
+          "",
+          "== 暗号化済みGit認証情報を含めて、process_history_id, project_id, generation_target, task_options, revision_number, user_name, token_password（暗号化済み）を含むTaskRegistrationMessageを作成する ==",
+          "FE -> FE: TaskRegistrationMessageインスタンス生成",
+          "",
+          "== TaskRegistrationMessageをMQTTブローカーの /docifycode/TaskRegistration/{process_history_id} トピックへQoS=2, retain=trueでpublishする ==",
+          "FE -> MQTT ++: publish TaskRegistrationMessage\\n(topic: /docifycode/TaskRegistration/{process_history_id},\\nQoS=2, retain=true)",
+          "deactivate FE",
+          "",
+          "== Mosquittoブローカーがタスク登録メッセージを受信し、後続のGenerative Serviceへ配信する ==",
+          "MQTT -> MQTT: メッセージを保持し、/docifycode/TaskRegistration/{process_history_id}購読者へ配信",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "プロジェクト設定イベントを受信して設定キャッシュを更新または削除する",
+        "sequence_diagram": [
+          "@startuml",
+          "title プロジェクト設定イベントを受信して設定キャッシュを更新または削除する",
+          "",
+          "participant \"MQTTブローカー\" as Broker",
+          "participant \"AICodeBot\" as Bot",
+          "",
+          "== MQTTブローカーが/docifycode/gitinfo/{project_id}トピックでProjectEventMessageをpublishする。 ==",
+          "Broker -> Bot : ProjectEventMessage (type, project_id) をpublish [kind=async]",
+          "",
+          "== AICodeBotがMQTTブローカーからProjectEventMessageを受信する。 ==",
+          "activate Bot",
+          "Bot -> Bot : メッセージ受信",
+          "",
+          "== AICodeBotが受信したメッセージをJSONデコードし、Pydanticスキーマでバリデーションする。 ==",
+          "Bot -> Bot : JSONデコード & Pydanticバリデーション",
+          "",
+          "alt イベントタイプが new または edit",
+          "    == イベントタイプがnewまたはeditの場合、対象プロジェクトIDを抽出する。 ==",
+          "    Bot -> Bot : project_id抽出",
+          "",
+          "    == AICodeBotが対象プロジェクトの最新設定情報を取得または再構築する。 ==",
+          "    Bot -> Bot : プロジェクト設定情報を取得/再構築",
+          "",
+          "    == AICodeBotが内部キャッシュに最新の設定情報を反映する。 ==",
+          "    Bot -> Bot : 設定キャッシュを更新",
+          "",
+          "else イベントタイプが delete",
+          "    == イベントタイプがdeleteの場合、対象プロジェクトIDを抽出する。 ==",
+          "    Bot -> Bot : project_id抽出",
+          "",
+          "    == AICodeBotが設定キャッシュに該当プロジェクトが存在するか確認する。 ==",
+          "    Bot -> Bot : 設定キャッシュ存在確認",
+          "",
+          "    alt 該当プロジェクトの設定キャッシュが存在する場合",
+          "        == 該当プロジェクトの設定キャッシュが存在する場合、AICodeBotがキャッシュを削除する。 ==",
+          "        Bot -> Bot : 設定キャッシュ削除",
+          "    else キャッシュが存在しない場合",
+          "        Bot -> Bot : 何もせず終了",
+          "    end",
+          "",
+          "else イベントタイプが不正",
+          "    == イベントタイプが不正な場合、AICodeBotがエラーとしてログ出力し処理を終了する。 ==",
+          "    Bot -> Bot : エラーログ出力・処理終了",
+          "end",
+          "",
+          "deactivate Bot",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "完了した処理に対して次工程のタスクを自動登録する",
+        "sequence_diagram": [
+          "@startuml",
+          "title 完了した処理に対して次工程のタスクを自動登録する",
+          "",
+          "participant DocifyCodeFrontendBackend as FE",
+          "participant MQTTブローカー as MQTT",
+          "participant DocifyCodeGenerativeService as GS",
+          "",
+          "== DocifyCodeFrontendBackendがMQTTブローカーから進捗ステータスメッセージ（status=completedまたはerror）を受信する。 ==",
+          "FE -> MQTT : subscribe /docifycode/status/+",
+          "activate FE",
+          "MQTT --> FE : StatusMessage(process_history_id, project_id, status=completed|error, generation_target, ...)",
+          "",
+          "== 受信したステータスのgeneration_targetが生成連鎖対象かどうかを判定する。 ==",
+          "FE -> FE : 判定: generation_targetが生成連鎖対象か？",
+          "",
+          "alt 生成連鎖対象",
+          "    == 生成連鎖対象であれば、次工程のgeneration_targetを決定する。 ==",
+          "    FE -> FE : 次工程のgeneration_targetを決定",
+          "",
+          "    == 次工程用の新しいprocess_history_idを生成する。 ==",
+          "    FE -> FE : 新しいprocess_history_idを生成",
+          "",
+          "    == 次工程のTaskRegistrationMessageを作成する（必要なパラメータをセット）。 ==",
+          "    FE -> FE : TaskRegistrationMessageを作成（project_id, 次工程generation_target, ...）",
+          "",
+          "    == TaskRegistrationMessageをMQTTブローカーの /docifycode/TaskRegistration/{process_history_id} トピックへpublish（QoS=2, retain=true）する。 ==",
+          "    FE -> MQTT : publish TaskRegistrationMessage (QoS=2, retain=true)\\n/docifycode/TaskRegistration/{new_process_history_id}",
+          "deactivate FE",
+          "",
+          "    == MQTTブローカーがメッセージを受信し、保持する。 ==",
+          "    activate MQTT",
+          "    note right of MQTT",
+          "      retain=trueのため、最新TaskRegistrationMessageを保持",
+          "    end note",
+          "",
+          "    == DocifyCodeGenerativeServiceが該当トピックをsubscribeし、次工程の生成処理を開始する。 ==",
+          "    GS -> MQTT : subscribe /docifycode/TaskRegistration/+",
+          "    MQTT --> GS : TaskRegistrationMessage (新しいprocess_history_id)",
+          "    activate GS",
+          "    GS -> GS : 生成処理を開始",
+          "    deactivate GS",
+          "    deactivate MQTT",
+          "",
+          "else 生成連鎖対象でない",
+          "    FE -> FE : 次工程のタスク登録は行わない",
+          "    deactivate FE",
+          "end",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "空ペイロードの保持解除メッセージを無視する",
+        "sequence_diagram": [
+          "@startuml",
+          "title 空ペイロードの保持解除メッセージを無視する",
+          "",
+          "participant \"MQTTブローカー\" as Broker",
+          "participant \"購読側コンポーネント\" as Subscriber",
+          "",
+          "== MQTTブローカーが空ペイロードのメッセージをpublishする（retain削除目的） ==",
+          "Broker -> Subscriber : MQTTメッセージ（ペイロード: 空, retain=true）を送信",
+          "",
+          "== 購読側コンポーネントがMQTTメッセージを受信する ==",
+          "activate Subscriber",
+          "Subscriber -> Subscriber : 受信ハンドラ起動",
+          "",
+          "== 受信メッセージのペイロードが空かどうかを判定する ==",
+          "Subscriber -> Subscriber : ペイロードが空か判定",
+          "",
+          "alt ペイロードが空の場合",
+          "    == 空ペイロードの場合、保持解除目的のメッセージとみなす ==",
+          "    Subscriber -> Subscriber : 保持解除目的の空メッセージと判定",
+          "",
+          "    == 通常の業務コールバック（処理）を実行せず、即時returnする ==",
+          "    Subscriber -> Subscriber : 業務処理を行わずreturn",
+          "",
+          "    == 何も処理せずシナリオ終了 ==",
+          "    deactivate Subscriber",
+          "else ペイロードが空でない場合",
+          "    Subscriber -> Subscriber : 通常の業務メッセージとして処理継続",
+          "    deactivate Subscriber",
+          "end",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "プロジェクト設定イベントを送信する",
+        "sequence_diagram": [
+          "@startuml",
+          "title プロジェクト設定イベントを送信する: FrontendBackendからAICodeBotへのProjectEventMessage通知フロー",
+          "",
+          "actor ユーザー",
+          "participant DocifyCodeFrontendBackend",
+          "participant Mosquittoブローカー",
+          "participant AICodeBot",
+          "",
+          "== ユーザーがプロジェクトの新規作成・編集・削除操作を実施する ==",
+          "ユーザー -> DocifyCodeFrontendBackend: プロジェクト新規作成・編集・削除操作",
+          "",
+          "== DocifyCodeFrontendBackendがユーザー操作を受けてProjectEventMessageを生成する ==",
+          "activate DocifyCodeFrontendBackend",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: ProjectEventMessage生成",
+          "",
+          "== イベントタイプ（new/edit/delete）とプロジェクトIDをメッセージに含める ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: type, project_idをセット",
+          "",
+          "== PydanticスキーマでProjectEventMessageのバリデーションを行う ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: Pydanticバリデーション",
+          "alt バリデーション成功",
+          "    ' 続行",
+          "else バリデーション失敗",
+          "    DocifyCodeFrontendBackend -> ユーザー: エラー応答（バリデーション失敗）",
+          "    deactivate DocifyCodeFrontendBackend",
+          "    stop",
+          "end",
+          "",
+          "== MQTTブローカー（Mosquitto）の/docifycode/gitinfo/{project_id}トピックへQoS=2, retain=Falseでpublishする ==",
+          "DocifyCodeFrontendBackend -> Mosquittoブローカー: ProjectEventMessageをpublish\\n(topic: /docifycode/gitinfo/{project_id}, QoS=2, retain=False)",
+          "deactivate DocifyCodeFrontendBackend",
+          "",
+          "== Mosquittoブローカーが受信したメッセージをAICodeBotへ配信する ==",
+          "Mosquittoブローカー -> AICodeBot: ProjectEventMessageをdeliver",
+          "",
+          "== AICodeBotがProjectEventMessageを受信し、typeに応じてプロジェクト設定キャッシュの再構築または削除を行う ==",
+          "activate AICodeBot",
+          "alt type = new または edit",
+          "    AICodeBot -> AICodeBot: プロジェクト設定キャッシュ再構築",
+          "else type = delete",
+          "    AICodeBot -> AICodeBot: プロジェクト設定キャッシュから削除",
+          "end",
+          "deactivate AICodeBot",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "タスク進捗ステータスを受信してDB更新とWebSocket配信を行う",
+        "sequence_diagram": [
+          "@startuml",
+          "title タスク進捗ステータスを受信してDB更新とWebSocket配信を行う",
+          "",
+          "participant \"Mosquittoブローカー\" as Broker",
+          "participant \"DocifyCodeFrontendBackend\" as Backend",
+          "participant \"DB（永続化層）\" as DB",
+          "participant \"WebSocketクライアント\" as WSClient",
+          "",
+          "== MQTTクライアントが/docifycode/status/+ トピックをQoS=2で購読開始する ==",
+          "Backend -> Broker: SUBSCRIBE /docifycode/status/+ (QoS=2)",
+          "activate Backend",
+          "Broker -> Backend: SUBACK",
+          "",
+          "== MQTTブローカー（Mosquitto）が進捗ステータスメッセージ（StatusMessage）をpublishし、Frontend Backendへ配信する ==",
+          "Broker -> Backend: PUBLISH StatusMessage (QoS=2, retain=true)",
+          "",
+          "== Frontend BackendのMQTT購読処理がメッセージを受信する ==",
+          "activate Backend",
+          "",
+          "== 受信したメッセージのペイロードが空かどうかを判定し、空の場合は保持解除用として無視する ==",
+          "Backend -> Backend: ペイロードが空か判定",
+          "alt ペイロードが空",
+          "    Backend -> Backend: 保持解除用として無視しreturn",
+          "    deactivate Backend",
+          "else ペイロードが空でない",
+          "    == ペイロードが空でなければ、JSONデコードとPydanticスキーマバリデーションを実施する ==",
+          "    Backend -> Backend: JSONデコード & Pydanticバリデーション",
+          "    alt デコード・バリデーション失敗",
+          "        Backend -> Backend: エラーログ出力・状態error化",
+          "        deactivate Backend",
+          "    else バリデーション成功",
+          "        == バリデーションに成功した場合、process_history_id・project_id・statusを抽出する ==",
+          "        Backend -> Backend: process_history_id, project_id, status抽出",
+          "",
+          "        == DBから該当する処理履歴またはプロジェクトレコードを検索する ==",
+          "        Backend -> DB: レコード検索(process_history_id or project_id)",
+          "        activate DB",
+          "        alt レコードが存在する",
+          "            == 該当レコードが存在すれば、statusを受信値で更新し、DBへ保存する（失敗時はエラーログ） ==",
+          "            DB -> DB: ステータス更新",
+          "            DB -> Backend: 更新結果(成功/失敗)",
+          "            deactivate DB",
+          "            alt DB更新失敗",
+          "                Backend -> Backend: エラーログ出力",
+          "            else DB更新成功",
+          "                == 接続中のWebSocketクライアント一覧から、該当process_history_idを監視しているクライアントを抽出する ==",
+          "                Backend -> Backend: 監視中WebSocketクライアント抽出",
+          "",
+          "                == 該当WebSocketクライアントへStatusMessageをリアルタイム配信する（送信失敗時はエラーログ） ==",
+          "                alt 配信対象クライアントが存在",
+          "                    Backend -> WSClient: StatusMessageを送信",
+          "                    alt 送信失敗",
+          "                        Backend -> Backend: エラーログ出力",
+          "                    else 送信成功",
+          "                        WSClient -> WSClient: 進捗ステータスを受信・表示",
+          "                    end",
+          "                else 配信対象なし",
+          "                    Backend -> Backend: 何もせず終了",
+          "                end",
+          "            end",
+          "        else レコードが存在しない",
+          "            DB -> Backend: レコードなし",
+          "            deactivate DB",
+          "            Backend -> Backend: エラーログ出力",
+          "        end",
+          "    end",
+          "end",
+          "",
+          "deactivate Backend",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "完了またはエラー時にステータス保持メッセージを削除する",
+        "sequence_diagram": [
+          "@startuml",
+          "title 完了またはエラー時にステータス保持メッセージを削除する",
+          "",
+          "participant FrontendBackend as DocifyCodeFrontendBackend",
+          "participant Mosquitto as MQTTブローカー（Mosquitto）",
+          "",
+          "== DocifyCodeFrontendBackendがMQTTブローカーからStatusMessageを受信する ==",
+          "Mosquitto -> FrontendBackend: StatusMessage (status=completed/error など) をdeliver",
+          "activate FrontendBackend",
+          "",
+          "== 受信したStatusMessageのstatusフィールドが\"completed\"または\"error\"であるか判定する ==",
+          "FrontendBackend -> FrontendBackend: statusフィールドを判定",
+          "",
+          "alt statusが\"completed\"または\"error\"の場合",
+          "    == statusが\"completed\"または\"error\"の場合、DocifyCodeFrontendBackendは該当のstatusトピック（/docifycode/status/{process_history_id}）に空ペイロードのメッセージをretain=trueでpublishする ==",
+          "    FrontendBackend -> Mosquitto: 空ペイロードのretainメッセージをpublish (topic=/docifycode/status/{process_history_id}, retain=true)",
+          "    deactivate FrontendBackend",
+          "",
+          "    == MQTTブローカー（Mosquitto）は空ペイロードのretainメッセージを受信し、該当トピックの保持メッセージを削除する ==",
+          "    activate Mosquitto",
+          "    Mosquitto -> Mosquitto: 該当トピックの保持メッセージを削除",
+          "    deactivate Mosquitto",
+          "",
+          "    == 以降、同トピックをsubscribeしたクライアントは保持メッセージを受信しなくなる ==",
+          "    note over Mosquitto: /docifycode/status/{process_history_id}のretained messageは消去済み",
+          "else statusが\"completed\"または\"error\"以外",
+          "    deactivate FrontendBackend",
+          "    note over FrontendBackend: 保持削除は行わない",
+          "end",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "オフライン中に蓄積したメッセージを再送する",
+        "sequence_diagram": [
+          "@startuml",
+          "title オフライン中に蓄積したメッセージを再送する（Generative ServiceのMQTT再接続・キューflushシナリオ）",
+          "",
+          "participant \"DocifyCodeGenerativeService\\n(GS)\" as GS",
+          "participant \"MQTTブローカー\\n(Mosquitto)\" as MQTT",
+          "",
+          "== 1. Generative ServiceがMQTTブローカーへの接続状態を定期的に監視する。 ==",
+          "activate GS",
+          "GS -> GS: MQTT接続状態を監視（定期チェック）",
+          "",
+          "== 2. MQTT接続が切断された場合、進捗ステータスメッセージや保持解除操作（retentionクリア）を送信しようとすると、送信できなかったメッセージを内部キューに蓄積する。 ==",
+          "alt MQTT接続が切断された場合",
+          "    note right of GS: MQTT送信失敗時、メッセージを内部キューにenqueue",
+          "    GS -> GS: StatusMessage/retentionクリア要求を内部キューに追加",
+          "end",
+          "",
+          "== 3. MQTT接続が復旧するまで、内部キューにメッセージを追加し続ける。 ==",
+          "loop MQTT未接続の間",
+          "    GS -> GS: 新たな送信要求も内部キューに追加",
+          "end",
+          "",
+          "== 4. MQTT接続が再確立されたことを検知したら、内部キューに蓄積された全メッセージを順次MQTTブローカーへ再送する。 ==",
+          "alt MQTT接続が復旧",
+          "    GS -> GS: 内部キューflush処理開始",
+          "    loop キュー内メッセージがある間",
+          "        GS -> MQTT: メッセージpublish(kind=async)",
+          "        == 5. 各メッセージの送信結果を確認し、送信に失敗した場合はエラーログを出力する。 ==",
+          "        alt publish成功",
+          "            GS -> GS: メッセージをキューから削除",
+          "        else publish失敗",
+          "            GS -> GS: エラーログ出力",
+          "            GS -> GS: メッセージはキューに残す",
+          "        end",
+          "    end",
+          "    == 6. 送信成功したメッセージをキューから削除し、全てのメッセージ送信が完了したらキューをクリアする。 ==",
+          "    GS -> GS: キューが空になったらflush完了",
+          "end",
+          "",
+          "== 7. 以降はMQTT接続が維持されている限り、通常通りメッセージを即時送信する。 ==",
+          "alt MQTT接続が維持されている",
+          "    GS -> MQTT: 新規メッセージを即時publish(kind=async)",
+          "else MQTT切断時",
+          "    GS -> GS: 送信失敗メッセージを再び内部キューへ",
+          "end",
+          "",
+          "deactivate GS",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "MQTTブローカーへ接続して購読を開始する",
+        "sequence_diagram": [
+          "@startuml",
+          "title MQTTブローカーへ接続して購読を開始する - 各コンポーネントのMQTT接続・購読初期化シナリオ",
+          "",
+          "participant DocifyCodeFrontendBackend",
+          "participant DocifyCodeGenerativeService",
+          "participant AICodeBot",
+          "participant MosquittoBroker",
+          "",
+          "== 各コンポーネントが起動し、環境変数からMQTT接続パラメータ（ホスト、ポート、client_id、keepalive、QoS、clean_session）を読み込む ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: 環境変数から接続パラメータを取得",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 環境変数から接続パラメータを取得",
+          "AICodeBot -> AICodeBot: 環境変数から接続パラメータを取得",
+          "",
+          "== MQTTクライアントインスタンスを生成し、設定値を適用する ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: MQTTクライアント生成 (client_id=\"api_test_publisher\", clean_session=False, QoS=2, keepalive=60)",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: MQTTクライアント生成 (client_id=\"design_task_subscriber\", clean_session=True, QoS=2, keepalive=60)",
+          "AICodeBot -> AICodeBot: MQTTクライアント生成 (client_id=\"ai_programming_service_client\", clean_session=True, QoS=2, keepalive=60)",
+          "",
+          "== MQTTブローカー（Mosquitto）へ接続を試行する ==",
+          "DocifyCodeFrontendBackend -> MosquittoBroker: MQTT接続要求 (client_id, clean_session, QoS, keepalive)",
+          "activate MosquittoBroker",
+          "alt 接続成功",
+          "    MosquittoBroker -> DocifyCodeFrontendBackend: 接続成功応答",
+          "    DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: 接続成功ログ出力",
+          "else 接続失敗",
+          "    MosquittoBroker -> DocifyCodeFrontendBackend: 接続失敗応答",
+          "    DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "DocifyCodeGenerativeService -> MosquittoBroker: MQTT接続要求 (client_id, clean_session, QoS, keepalive)",
+          "activate MosquittoBroker",
+          "alt 接続成功",
+          "    MosquittoBroker -> DocifyCodeGenerativeService: 接続成功応答",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 接続成功ログ出力",
+          "else 接続失敗",
+          "    MosquittoBroker -> DocifyCodeGenerativeService: 接続失敗応答",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "AICodeBot -> MosquittoBroker: MQTT接続要求 (client_id, clean_session, QoS, keepalive)",
+          "activate MosquittoBroker",
+          "alt 接続成功",
+          "    MosquittoBroker -> AICodeBot: 接続成功応答",
+          "    AICodeBot -> AICodeBot: 接続成功ログ出力",
+          "else 接続失敗",
+          "    MosquittoBroker -> AICodeBot: 接続失敗応答",
+          "    AICodeBot -> AICodeBot: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "== 接続成功時、ログを出力し、メッセージ送受信の準備を完了する ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: メッセージ送受信準備完了",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: メッセージ送受信準備完了",
+          "AICodeBot -> AICodeBot: メッセージ送受信準備完了",
+          "",
+          "== DocifyCodeFrontendBackendはclean_session=Falseで永続セッションを確立し、/docifycode/status/+ トピックをQoS2でワイルドカード購読する ==",
+          "DocifyCodeFrontendBackend -> MosquittoBroker: subscribe /docifycode/status/+ (QoS=2, clean_session=False)",
+          "activate MosquittoBroker",
+          "alt 購読成功",
+          "    MosquittoBroker -> DocifyCodeFrontendBackend: 購読成功応答",
+          "    DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: 購読成功ログ出力",
+          "else 購読失敗",
+          "    MosquittoBroker -> DocifyCodeFrontendBackend: 購読失敗応答",
+          "    DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "== DocifyCodeGenerativeServiceはclean_session=Trueで /docifycode/TaskRegistration/+ トピックをQoS2でワイルドカード購読する ==",
+          "DocifyCodeGenerativeService -> MosquittoBroker: subscribe /docifycode/TaskRegistration/+ (QoS=2, clean_session=True)",
+          "activate MosquittoBroker",
+          "alt 購読成功",
+          "    MosquittoBroker -> DocifyCodeGenerativeService: 購読成功応答",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 購読成功ログ出力",
+          "else 購読失敗",
+          "    MosquittoBroker -> DocifyCodeGenerativeService: 購読失敗応答",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "== AICodeBotはclean_session=Trueで /docifycode/code/+ および /docifycode/gitinfo/+ トピックをQoS2でワイルドカード購読する ==",
+          "AICodeBot -> MosquittoBroker: subscribe /docifycode/code/+ (QoS=2, clean_session=True)",
+          "activate MosquittoBroker",
+          "alt 購読成功",
+          "    MosquittoBroker -> AICodeBot: 購読成功応答",
+          "    AICodeBot -> AICodeBot: 購読成功ログ出力",
+          "else 購読失敗",
+          "    MosquittoBroker -> AICodeBot: 購読失敗応答",
+          "    AICodeBot -> AICodeBot: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "AICodeBot -> MosquittoBroker: subscribe /docifycode/gitinfo/+ (QoS=2, clean_session=True)",
+          "activate MosquittoBroker",
+          "alt 購読成功",
+          "    MosquittoBroker -> AICodeBot: 購読成功応答",
+          "    AICodeBot -> AICodeBot: 購読成功ログ出力",
+          "else 購読失敗",
+          "    MosquittoBroker -> AICodeBot: 購読失敗応答",
+          "    AICodeBot -> AICodeBot: エラーログ出力・再試行",
+          "end",
+          "deactivate MosquittoBroker",
+          "",
+          "== 各購読時、MQTTクライアントはコールバック関数を登録し、該当トピックのメッセージ受信時に処理を実行できるようにする ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: /docifycode/status/+ コールバック登録",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: /docifycode/TaskRegistration/+ コールバック登録",
+          "AICodeBot -> AICodeBot: /docifycode/code/+ コールバック登録",
+          "AICodeBot -> AICodeBot: /docifycode/gitinfo/+ コールバック登録",
+          "",
+          "== 購読成功時、ログを出力し、購読状態を維持する ==",
+          "DocifyCodeFrontendBackend -> DocifyCodeFrontendBackend: 購読状態維持",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 購読状態維持",
+          "AICodeBot -> AICodeBot: 購読状態維持",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "コード生成リクエストを送信する",
+        "sequence_diagram": [
+          "@startuml",
+          "title コード生成リクエストを送信する: /docifycode/code/{process_history_id} へのCodeGenerationMessage発行とAICodeBotへの通知",
+          "",
+          "actor ユーザー",
+          "participant DocifyCodeFrontendBackend as FE",
+          "participant Mosquittoブローカー as MQTT",
+          "participant AICodeBot as AB",
+          "",
+          "== ユーザーがフロントエンドバックエンドにてコード生成を依頼する操作を実施する ==",
+          "ユーザー -> FE: コード生成依頼操作",
+          "",
+          "== DocifyCodeFrontendBackendがユーザー操作を受けてCodeGenerationMessageを生成する ==",
+          "activate FE",
+          "FE -> FE: CodeGenerationMessageインスタンス生成",
+          "",
+          "== 対象プロジェクトID、処理履歴ID、対象ブランチ、対象言語をメッセージに含める ==",
+          "FE -> FE: メッセージにprocess_history_id, project_id, target_branch, target_languageをセット",
+          "",
+          "== Pydanticスキーマでメッセージ内容をバリデーションする ==",
+          "FE -> FE: Pydanticスキーマでバリデーション",
+          "alt バリデーション成功",
+          "    ' 続行",
+          "else バリデーション失敗",
+          "    FE -> ユーザー: エラー応答（バリデーションエラー内容）",
+          "    deactivate FE",
+          "    return",
+          "end",
+          "",
+          "== MQTTブローカー（Mosquitto）の /docifycode/code/{process_history_id} トピックへQoS=2, retain=Falseでpublishする ==",
+          "FE -> MQTT: publish CodeGenerationMessage\\n(topic: /docifycode/code/{process_history_id}, QoS=2, retain=False)",
+          "deactivate FE",
+          "",
+          "== Mosquittoブローカーがメッセージを受信し、AICodeBotが該当トピックをsubscribeしているため配信する ==",
+          "MQTT -> AB: deliver CodeGenerationMessage\\n(/docifycode/code/{process_history_id})",
+          "",
+          "== AICodeBotがCodeGenerationMessageを受信し、generation_target=code_from_detailed_designの場合のみ処理を開始する ==",
+          "activate AB",
+          "AB -> AB: generation_targetを判定",
+          "alt generation_target=code_from_detailed_design",
+          "    AB -> AB: コード生成処理を開始",
+          "else その他",
+          "    AB -> AB: 無視または未対応処理",
+          "end",
+          "deactivate AB",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "不正または解釈不能なメッセージをエラーとして処理する",
+        "sequence_diagram": [
+          "@startuml",
+          "title 不正または解釈不能なメッセージをエラーとして処理する - MQTT受信異常系標準フロー",
+          "",
+          "participant MQTTブローカー",
+          "participant 受信コンポーネント",
+          "participant DB",
+          "",
+          "== MQTTブローカーからメッセージを受信する ==",
+          "MQTTブローカー -> 受信コンポーネント: メッセージ配信",
+          "activate 受信コンポーネント",
+          "",
+          "== メッセージペイロードが空か判定する ==",
+          "受信コンポーネント -> 受信コンポーネント: ペイロード判定",
+          "",
+          "alt ペイロードが空の場合",
+          "    == 空の場合は保持解除用メッセージとして無視し処理終了 ==",
+          "    受信コンポーネント -> 受信コンポーネント: 保持解除用メッセージとして無視",
+          "    deactivate 受信コンポーネント",
+          "else ペイロードが空でない場合",
+          "    == 空でない場合はメッセージをJSONとしてデコードする ==",
+          "    受信コンポーネント -> 受信コンポーネント: JSONデコード処理",
+          "",
+          "    alt JSONデコードに失敗した場合",
+          "        == JSONデコードに失敗した場合、エラーログを出力し、例外情報を保存、必要に応じてDBへ例外記録、該当処理の状態をerrorへ更新し処理終了 ==",
+          "        受信コンポーネント -> 受信コンポーネント: エラーログ出力",
+          "        受信コンポーネント -> 受信コンポーネント: 例外情報保存",
+          "        alt DB記録が必要な場合",
+          "            受信コンポーネント -> DB: 例外情報をDBへ記録",
+          "        end",
+          "        受信コンポーネント -> 受信コンポーネント: 該当処理の状態をerrorへ更新",
+          "        deactivate 受信コンポーネント",
+          "    else JSONデコード成功の場合",
+          "        == JSONデコードに成功した場合、Pydanticスキーマでバリデーションを行う ==",
+          "        受信コンポーネント -> 受信コンポーネント: Pydanticスキーマバリデーション",
+          "",
+          "        alt バリデーションに失敗した場合",
+          "            == バリデーションに失敗した場合、エラーログを出力し、例外情報を保存、必要に応じてDBへ例外記録、該当処理の状態をerrorへ更新し処理終了 ==",
+          "            受信コンポーネント -> 受信コンポーネント: エラーログ出力",
+          "            受信コンポーネント -> 受信コンポーネント: 例外情報保存",
+          "            alt DB記録が必要な場合",
+          "                受信コンポーネント -> DB: 例外情報をDBへ記録",
+          "            end",
+          "            受信コンポーネント -> 受信コンポーネント: 該当処理の状態をerrorへ更新",
+          "            deactivate 受信コンポーネント",
+          "        else バリデーション成功の場合",
+          "            == バリデーションに成功した場合、通常の業務処理を実行する ==",
+          "            受信コンポーネント -> 受信コンポーネント: 業務処理実行",
+          "",
+          "            alt 業務処理中に例外が発生した場合",
+          "                == 業務処理中に例外が発生した場合、エラーログを出力し、例外情報を保存、必要に応じてDBへ例外記録、該当処理の状態をerrorへ更新し処理終了 ==",
+          "                受信コンポーネント -> 受信コンポーネント: エラーログ出力",
+          "                受信コンポーネント -> 受信コンポーネント: 例外情報保存",
+          "                alt DB記録が必要な場合",
+          "                    受信コンポーネント -> DB: 例外情報をDBへ記録",
+          "                end",
+          "                受信コンポーネント -> 受信コンポーネント: 該当処理の状態をerrorへ更新",
+          "                deactivate 受信コンポーネント",
+          "            else 業務処理が正常に終了した場合",
+          "                == 業務処理が正常に終了した場合、処理を完了する ==",
+          "                受信コンポーネント -> 受信コンポーネント: 処理完了",
+          "                deactivate 受信コンポーネント",
+          "            end",
+          "        end",
+          "    end",
+          "end",
+          "",
+          "@enduml"
+        ]
+      },
+      {
+        "scenario_name": "タスク登録メッセージを受信して生成処理を開始する",
+        "sequence_diagram": [
+          "@startuml",
+          "title タスク登録メッセージを受信して生成処理を開始する",
+          "",
+          "participant DocifyCodeGenerativeService",
+          "participant Mosquittoブローカー",
+          "",
+          "== DocifyCodeGenerativeServiceがMQTTブローカーからTaskRegistrationトピックのメッセージを受信する ==",
+          "Mosquittoブローカー -> DocifyCodeGenerativeService: TaskRegistrationMessage (topic: /docifycode/TaskRegistration/{process_history_id})",
+          "activate DocifyCodeGenerativeService",
+          "",
+          "== 受信したメッセージペイロードが空でないかを判定する（空の場合は無視） ==",
+          "DocifyCodeGenerativeService -> DocifyCodeGenerativeService: ペイロード空判定",
+          "alt ペイロードが空",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 無視して処理終了",
+          "    deactivate DocifyCodeGenerativeService",
+          "else ペイロードが空でない",
+          "    == メッセージをJSONとしてデコードする ==",
+          "    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: JSONデコード",
+          "    alt JSONデコード失敗",
+          "        == デコード結果をPydanticスキーマでバリデーションする ==",
+          "        DocifyCodeGenerativeService -> DocifyCodeGenerativeService: エラーログ出力",
+          "        DocifyCodeGenerativeService -> Mosquittoブローカー: StatusMessage(status=error) (topic: /docifycode/status/{process_history_id})",
+          "        deactivate DocifyCodeGenerativeService",
+          "    else JSONデコード成功",
+          "        == デコード結果をPydanticスキーマでバリデーションする ==",
+          "        DocifyCodeGenerativeService -> DocifyCodeGenerativeService: Pydanticバリデーション",
+          "        alt バリデーション失敗",
+          "            == バリデーションに失敗した場合はエラーログ出力・状態をerrorで通知し処理終了 ==",
+          "            DocifyCodeGenerativeService -> DocifyCodeGenerativeService: エラーログ出力",
+          "            DocifyCodeGenerativeService -> Mosquittoブローカー: StatusMessage(status=error) (topic: /docifycode/status/{process_history_id})",
+          "            deactivate DocifyCodeGenerativeService",
+          "        else バリデーション成功",
+          "            == generation_targetの値に応じて処理分岐を決定する ==",
+          "            DocifyCodeGenerativeService -> DocifyCodeGenerativeService: generation_target判定",
+          "",
+          "            == task_optionsやrevision_number、user_name等のオプション値を取得する ==",
+          "            DocifyCodeGenerativeService -> DocifyCodeGenerativeService: オプション値取得",
+          "",
+          "            == token_passwordフィールドが存在する場合は共通暗号化モジュールでAES-256-GCM復号を行う ==",
+          "            alt token_password存在",
+          "                DocifyCodeGenerativeService -> DocifyCodeGenerativeService: AES-256-GCM復号",
+          "                alt 復号失敗",
+          "                    == 復号に失敗した場合はエラーログ出力・認証情報なしで処理継続またはエラー通知 ==",
+          "                    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: エラーログ出力",
+          "                    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 認証情報なしで処理継続またはエラー通知",
+          "                else 復号成功",
+          "                    == 復号に成功した場合は平文のGit認証情報を生成処理用に利用可能とする ==",
+          "                    DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 平文Git認証情報利用可能",
+          "                end",
+          "            else token_passwordなし",
+          "                DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 認証情報なしで処理継続",
+          "            end",
+          "",
+          "            == バックグラウンドで対象の生成処理を開始する ==",
+          "            DocifyCodeGenerativeService -> DocifyCodeGenerativeService: 生成処理バックグラウンド開始",
+          "",
+          "            == 進捗ステータス（pending）をStatusトピックにpublishする ==",
+          "            DocifyCodeGenerativeService -> Mosquittoブローカー: StatusMessage(status=pending) (topic: /docifycode/status/{process_history_id})",
+          "",
+          "            == 以降、生成処理の進捗に応じてStatusメッセージをpublishし続ける ==",
+          "            loop 生成処理進捗",
+          "                DocifyCodeGenerativeService -> Mosquittoブローカー: StatusMessage(status=generating/completed/error/canceled) (topic: /docifycode/status/{process_history_id})",
+          "            end",
+          "",
+          "            deactivate DocifyCodeGenerativeService",
+          "        end",
+          "    end",
+          "end",
+          "",
+          "@enduml"
+        ]
+      }
+    ]
+  },
+  "directory_structure": {
+    "folder_structure": [
+      "src/",
+      "├── common/",
+      "│   ├── mqtt/",
+      "│   ├── schemas/",
+      "│   ├── security/",
+      "│   └── config/",
+      "├── frontend_backend/",
+      "│   ├── api/",
+      "│   ├── application/",
+      "│   ├── infrastructure/",
+      "│   │   ├── mqtt/",
+      "│   │   └── persistence/",
+      "│   └── integrations/",
+      "├── generative_service/",
+      "│   ├── application/",
+      "│   ├── infrastructure/",
+      "│   │   └── mqtt/",
+      "│   └── domain/",
+      "├── ai_code_bot/",
+      "│   ├── application/",
+      "│   ├── infrastructure/",
+      "│   │   └── mqtt/",
+      "│   └── domain/",
+      "├── deployment/",
+      "│   └── mqtt/",
+      "└── scripts/",
+      ""
+    ],
+    "naming_conventions": {
+      "folders": {
+        "purpose": "フォルダ名は小文字のスネークケース（snake_case）または単語連結（frontend_backendなど）で統一し、役割や責務が明確に分かる名前とする。Pythonの標準的な慣習に従う。",
+        "example": "frontend_backend, application, infrastructure, mqtt, schemas"
+      },
+      "files": {
+        "purpose": "ファイル名は小文字のスネークケース（snake_case）で記述し、内容や責務が一目で分かるようにする。PythonのPEP8に準拠する。",
+        "example": "task_registration_service.py, mqtt_client.py"
+      },
+      "classes": {
+        "purpose": "クラス名はパスカルケース（UpperCamelCase）で記述し、名詞または名詞句とする。Pydanticモデルやサービスクラスなどに適用する。",
+        "example": "TaskRegistrationService, StatusMessage"
+      },
+      "functions": {
+        "purpose": "関数名は小文字のスネークケース（snake_case）で記述し、動詞または動詞句とする。Pythonの標準的な命名規則に従う。",
+        "example": "publish_status_message, subscribe_to_topic"
+      },
+      "variables": {
+        "purpose": "変数名は小文字のスネークケース（snake_case）で記述し、意味が明確な名前とする。スコープに応じて適切な命名を行う。",
+        "example": "process_history_id, mqtt_broker_host"
+      },
+      "constants": {
+        "purpose": "定数は全て大文字のスネークケース（UPPER_SNAKE_CASE）で記述し、変更不可の値であることを明示する。",
+        "example": "MQTT_QOS, ENCRYPTION_KEY"
+      }
+    },
+    "file_placement_rules": {
+      "common_mqtt": {
+        "description": "MQTTクライアントラッパー、トピック定義、トピックハンドラ、メッセージ型マッピングなど、全コンポーネントで共通利用するMQTT関連の基盤コードを配置する。ここに配置されたコードは他のコンポーネントからimportして再利用する。",
+        "location": "src/common/mqtt/",
+        "example": "src/common/mqtt/"
+      },
+      "common_schemas": {
+        "description": "PydanticによるMQTTメッセージスキーマ（StatusMessage, TaskRegistrationMessage, CodeGenerationMessage, ProjectEventMessageなど）や基底クラスを配置する。全コンポーネントで共通利用される。",
+        "location": "src/common/schemas/",
+        "example": "src/common/schemas/"
+      },
+      "common_security": {
+        "description": "MQTTメッセージ内の認証情報暗号化・復号（AES-256-GCM）など、セキュリティ関連の共通処理を配置する。",
+        "location": "src/common/security/",
+        "example": "src/common/security/"
+      },
+      "common_config": {
+        "description": "MQTT接続設定や環境変数読み込みなど、共通の設定管理モジュールを配置する。",
+        "location": "src/common/config/",
+        "example": "src/common/config/"
+      },
+      "frontend_api": {
+        "description": "FastAPIのエンドポイント（HTTP, WebSocket）やMQTTメッセージpublish用のインターフェース層を配置する。外部からのリクエスト受付やWebSocket配信の起点となる。",
+        "location": "src/frontend_backend/api/",
+        "example": "src/frontend_backend/api/"
+      },
+      "frontend_application": {
+        "description": "タスク登録やステータス更新など、MQTTメッセージ処理のユースケースロジックを担うサービスクラスを配置する。ビジネスロジックの中心となる。",
+        "location": "src/frontend_backend/application/",
+        "example": "src/frontend_backend/application/"
+      },
+      "frontend_infrastructure_mqtt": {
+        "description": "MQTT購読・publish・再接続監視など、MQTTインフラ層の実装を配置する。paho-mqttのラッパー利用やMQTT接続状態監視などを担当する。",
+        "location": "src/frontend_backend/infrastructure/mqtt/",
+        "example": "src/frontend_backend/infrastructure/mqtt/"
+      },
+      "frontend_infrastructure_persistence": {
+        "description": "DBリポジトリや永続化関連の実装を配置する。MQTTで受信した進捗ステータスのDB反映などを担当する。",
+        "location": "src/frontend_backend/infrastructure/persistence/",
+        "example": "src/frontend_backend/infrastructure/persistence/"
+      },
+      "frontend_integrations": {
+        "description": "WebSocketブロードキャストなど、他システムやUIとの連携処理を配置する。MQTTで受信したイベントをWebSocket経由でフロントエンドに配信するなど。",
+        "location": "src/frontend_backend/integrations/",
+        "example": "src/frontend_backend/integrations/"
+      },
+      "generative_application": {
+        "description": "MQTTで受信したタスク登録メッセージの処理、AI生成オーケストレーション、進捗ステータスpublishなど、業務フローの中心となるサービスクラスを配置する。",
+        "location": "src/generative_service/application/",
+        "example": "src/generative_service/application/"
+      },
+      "generative_infrastructure_mqtt": {
+        "description": "MQTT購読・publish・メッセージキューイング（オフライン時の再送）など、MQTTインフラ層の実装を配置する。",
+        "location": "src/generative_service/infrastructure/mqtt/",
+        "example": "src/generative_service/infrastructure/mqtt/"
+      },
+      "generative_domain": {
+        "description": "生成対象（generation_target）など、ジェネレーティブサービス固有のドメインモデルや列挙型を配置する。",
+        "location": "src/generative_service/domain/",
+        "example": "src/generative_service/domain/"
+      },
+      "ai_code_bot_application": {
+        "description": "コード生成リクエスト監視、プロジェクト設定イベントハンドリング、ステータスpublishなど、AICodeBotの業務ロジックを担うサービスクラスを配置する。",
+        "location": "src/ai_code_bot/application/",
+        "example": "src/ai_code_bot/application/"
+      },
+      "ai_code_bot_infrastructure_mqtt": {
+        "description": "MQTT購読・publishなど、AICodeBotのMQTTインフラ層の実装を配置する。",
+        "location": "src/ai_code_bot/infrastructure/mqtt/",
+        "example": "src/ai_code_bot/infrastructure/mqtt/"
+      },
+      "ai_code_bot_domain": {
+        "description": "プロジェクト設定キャッシュなど、AICodeBot固有のドメインモデルを配置する。",
+        "location": "src/ai_code_bot/domain/",
+        "example": "src/ai_code_bot/domain/"
+      },
+      "deployment_mqtt": {
+        "description": "Eclipse MosquittoブローカーのDockerfile、設定ファイル、docker-compose定義、ビルド・起動スクリプトなど、MQTTブローカーのインフラ構成管理を配置する。",
+        "location": "deployment/mqtt/",
+        "example": "deployment/mqtt/"
+      },
+      "scripts": {
+        "description": "各コンポーネントの起動や開発補助用のシェルスクリプトを配置する。",
+        "location": "scripts/",
+        "example": "scripts/"
+      }
+    },
+    "module_partitioning_policies": [
+      {
+        "title": "コンポーネント単位の物理分割",
+        "description": "各実行コンポーネント（frontend_backend, generative_service, ai_code_bot）はsrc配下でディレクトリ単位に分割し、main.pyを起点とした独立したアプリケーションとして構成する。これにより、デプロイ単位や責務境界が明確になり、疎結合なイベント駆動連携を実現する。"
+      },
+      {
+        "title": "共通基盤コードの一元化",
+        "description": "MQTTクライアントラッパー、トピック定義、メッセージスキーマ、暗号化処理などはsrc/common配下に集約し、各コンポーネントからimportして再利用する。これにより、三重管理や重複実装を排除し、仕様変更時の整合性を担保する。"
+      },
+      {
+        "title": "レイヤー分離（interface/application/domain/infrastructure）",
+        "description": "各コンポーネント内部は、interface層（api, integrations）、application層（ユースケースサービス）、domain層（ドメインモデル・列挙型）、infrastructure層（MQTT/persistence等の外部連携）に分割する。これにより、責務ごとの変更影響範囲を限定し、テスト容易性と保守性を高める。"
+      },
+      {
+        "title": "インフラ構成の分離",
+        "description": "MQTTブローカーのDockerfileや設定、compose定義、起動スクリプトなどはdeployment/mqtt配下にまとめ、アプリケーションコードと明確に分離する。これにより、インフラ構成管理とアプリケーション開発の責務を分離できる。"
+      }
+    ]
+  }
+}
